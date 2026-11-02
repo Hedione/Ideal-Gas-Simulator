@@ -215,6 +215,7 @@ export class GasSimulation {
   count: number
   massAmu: number
   targetTemperature: number
+  boxLengthMeters: number
   elapsedTime = 0
   readonly collisionDiagnostics: CollisionDiagnostics = {
     enabled: false,
@@ -242,10 +243,14 @@ export class GasSimulation {
     temperature: number,
     massAmu: number,
     random: RandomSource = Math.random,
+    boxLengthMeters = BOX_LENGTH_METERS,
   ) {
     this.count = count
     this.targetTemperature = temperature
     this.massAmu = massAmu
+    this.boxLengthMeters = Number.isFinite(boxLengthMeters) && boxLengthMeters > 0
+      ? boxLengthMeters
+      : BOX_LENGTH_METERS
     this.random = random
     this.positions = new Float32Array(count * 3)
     this.velocities = new Float32Array(count * 3)
@@ -370,7 +375,62 @@ export class GasSimulation {
     if (resample) this.resampleVelocities()
   }
 
-  reset(temperature = this.targetTemperature): void {
+  setBoxLength(boxLengthMeters: number): void {
+    if (!Number.isFinite(boxLengthMeters) || boxLengthMeters <= 0) return
+    this.boxLengthMeters = boxLengthMeters
+    this.collisionDiagnostics.meanFreePath = Number.POSITIVE_INFINITY
+    this.collisionDiagnostics.meanCollisionTime = Number.POSITIVE_INFINITY
+    this.collisionDiagnostics.knudsenNumber = Number.POSITIVE_INFINITY
+  }
+
+  setUniformMeanSpeed(): void {
+    const meanSpeed = theoreticalMeanSpeed(this.targetTemperature, this.massAmu)
+    for (let particle = 0; particle < this.count; particle += 1) {
+      const index = particle * 3
+      const currentSpeed = Math.hypot(
+        this.velocities[index],
+        this.velocities[index + 1],
+        this.velocities[index + 2],
+      )
+      if (currentSpeed > 0) {
+        const scale = meanSpeed / currentSpeed
+        this.velocities[index] *= scale
+        this.velocities[index + 1] *= scale
+        this.velocities[index + 2] *= scale
+      } else {
+        const cosine = 1 - 2 * this.random()
+        const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine))
+        const azimuth = 2 * Math.PI * this.random()
+        this.velocities[index] = meanSpeed * sine * Math.cos(azimuth)
+        this.velocities[index + 1] = meanSpeed * sine * Math.sin(azimuth)
+        this.velocities[index + 2] = meanSpeed * cosine
+      }
+      this.speeds[particle] = meanSpeed
+    }
+    this.clearExperimentHistory()
+  }
+
+  alignVelocitiesToAxis(axis: 0 | 1 | 2): void {
+    for (let particle = 0; particle < this.count; particle += 1) {
+      const index = particle * 3
+      const speed = Math.hypot(
+        this.velocities[index],
+        this.velocities[index + 1],
+        this.velocities[index + 2],
+      )
+      const selectedComponent = this.velocities[index + axis]
+      const direction = selectedComponent === 0
+        ? (this.random() < 0.5 ? -1 : 1)
+        : Math.sign(selectedComponent)
+      this.velocities[index] = axis === 0 ? direction * speed : 0
+      this.velocities[index + 1] = axis === 1 ? direction * speed : 0
+      this.velocities[index + 2] = axis === 2 ? direction * speed : 0
+      this.speeds[particle] = speed
+    }
+    this.clearExperimentHistory()
+  }
+
+  private clearExperimentHistory(): void {
     this.elapsedTime = 0
     this.collisionDiagnostics.totalAccepted = 0
     this.collisionDiagnostics.acceptedLastAdvance = 0
@@ -379,6 +439,10 @@ export class GasSimulation {
     this.wallCollisionCounts.fill(0)
     this.thermalAccommodationCounts.fill(0)
     this.particleCollisionCounts.fill(0)
+  }
+
+  reset(temperature = this.targetTemperature): void {
+    this.clearExperimentHistory()
     this.randomizePositions()
     this.resampleVelocities(temperature)
   }
@@ -400,7 +464,7 @@ export class GasSimulation {
 
     if (!dsmcEnabled || !Number.isFinite(collisionDiameterMeters) || collisionDiameterMeters <= 0) {
       const speedBound = Math.max(1, characteristicMaxSpeed(this.targetTemperature, this.massAmu))
-      const maximumBathStep = (0.2 * BOX_LENGTH_METERS) / speedBound
+      const maximumBathStep = (0.2 * this.boxLengthMeters) / speedBound
       const requiredBathSubsteps = thermostatRate > 0 ? Math.max(1, Math.ceil(dt / maximumBathStep)) : 1
       const bathSubsteps = Math.min(64, requiredBathSubsteps)
       const bathStep = dt / bathSubsteps
@@ -415,7 +479,7 @@ export class GasSimulation {
     this.ensureCollisionBuffers(gridDimension)
     this.updateCollisionScales(collisionDiameterMeters)
 
-    const cellWidth = BOX_LENGTH_METERS / gridDimension
+    const cellWidth = this.boxLengthMeters / gridDimension
     const speedBound = Math.max(1, characteristicMaxSpeed(this.targetTemperature, this.massAmu))
     const maximumStep = (0.5 * cellWidth) / speedBound
     const requiredSubsteps = Math.max(1, Math.ceil(dt / maximumStep))
@@ -451,7 +515,7 @@ export class GasSimulation {
       for (let axis = 0; axis < 3; axis += 1) {
         const component = index + axis
         const proposed = this.positions[component] +
-          (this.velocities[component] * dt) / BOX_LENGTH_METERS
+          (this.velocities[component] * dt) / this.boxLengthMeters
         const crossings = axisWallCrossings(this.positions[component], proposed)
         if (crossings.total > 0) this.wallCollisionCounts[particle] += crossings.total
         if (thermostatRate > 0) {
@@ -508,14 +572,14 @@ export class GasSimulation {
   }
 
   private updateCollisionScales(collisionDiameterMeters: number): void {
-    const numberDensity = this.count / (BOX_LENGTH_METERS ** 3)
+    const numberDensity = this.count / (this.boxLengthMeters ** 3)
     const crossSection = Math.PI * collisionDiameterMeters * collisionDiameterMeters
     const meanFreePath = 1 / (Math.SQRT2 * numberDensity * crossSection)
     const meanSpeed = theoreticalMeanSpeed(this.targetTemperature, this.massAmu)
     this.collisionDiagnostics.gridDimension = this.collisionGridDimension
     this.collisionDiagnostics.meanFreePath = meanFreePath
     this.collisionDiagnostics.meanCollisionTime = meanFreePath / meanSpeed
-    this.collisionDiagnostics.knudsenNumber = meanFreePath / BOX_LENGTH_METERS
+    this.collisionDiagnostics.knudsenNumber = meanFreePath / this.boxLengthMeters
   }
 
   private applyDsmcCollisions(
@@ -551,7 +615,7 @@ export class GasSimulation {
       this.cellCursors[cell] += 1
     }
 
-    const cellWidth = BOX_LENGTH_METERS / dimension
+    const cellWidth = this.boxLengthMeters / dimension
     const cellVolume = cellWidth ** 3
     const crossSection = Math.PI * collisionDiameterMeters * collisionDiameterMeters
     const baselineRelativeSpeed = 6 * thermalSigma(this.targetTemperature, this.massAmu)

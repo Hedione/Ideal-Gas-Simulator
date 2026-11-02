@@ -4,7 +4,6 @@ import { MomentumSpaceView } from './components/MomentumSpaceView'
 import { SimulationView } from './components/SimulationView'
 import {
   BOLTZMANN,
-  BOX_LENGTH_METERS,
   COLLISION_DIAMETERS_ANGSTROM,
   GAS_SPECIES,
   GasName,
@@ -42,12 +41,14 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (val
 
 function App() {
   const [temperature, setTemperature] = useState(300)
+  const [temperatureDraft, setTemperatureDraft] = useState('300')
   const [massAmu, setMassAmu] = useState<number>(GAS_SPECIES.Argon)
   const [species, setSpecies] = useState<SpeciesSelection>('Argon')
   const [particleCount, setParticleCount] = useState(10_000)
   const [simulation, setSimulation] = useState(() => new GasSimulation(10_000, 300, GAS_SPECIES.Argon))
   const [playing, setPlaying] = useState(true)
   const [speedMultiplier, setSpeedMultiplier] = useState(0.01)
+  const [boxLengthMicrometers, setBoxLengthMicrometers] = useState(1)
   const [thermostatEnabled, setThermostatEnabled] = useState(true)
   const [thermostatRateNs, setThermostatRateNs] = useState(0.2)
   const [singleFaceBath, setSingleFaceBath] = useState(false)
@@ -117,15 +118,36 @@ function App() {
   const applyTemperature = useCallback((next: number) => {
     const value = Math.max(5, Math.min(5000, Number.isFinite(next) ? next : 300))
     setTemperature(value)
+    setTemperatureDraft(String(value))
     simulation.targetTemperature = value
     setThermostatEnabled(true)
   }, [simulation])
 
+  const commitTemperatureDraft = useCallback(() => {
+    if (temperatureDraft.trim() === '') {
+      setTemperatureDraft(String(temperature))
+      return
+    }
+    const parsed = Number(temperatureDraft)
+    if (!Number.isFinite(parsed)) {
+      setTemperatureDraft(String(temperature))
+      return
+    }
+    applyTemperature(parsed)
+  }, [applyTemperature, temperature, temperatureDraft])
+
+  const applyBoxLength = useCallback((nextMicrometers: number) => {
+    const micrometers = Math.max(0.1, Math.min(1, Number.isFinite(nextMicrometers) ? nextMicrometers : 1))
+    setBoxLengthMicrometers(micrometers)
+    simulation.setBoxLength(micrometers * 1e-6)
+    setStats(simulation.statistics())
+  }, [simulation])
+
   const rebuildSimulation = useCallback((count: number, temp: number, mass: number) => {
-    const next = new GasSimulation(count, temp, mass)
+    const next = new GasSimulation(count, temp, mass, Math.random, boxLengthMicrometers * 1e-6)
     setSimulation(next)
     setParticleCount(count)
-  }, [])
+  }, [boxLengthMicrometers])
 
   const resizeParticlePopulation = useCallback((nextCount: number) => {
     const count = Math.max(100, Math.min(50_000, Math.round(nextCount / 100) * 100))
@@ -156,6 +178,16 @@ function App() {
     setStats(simulation.statistics())
   }
 
+  const setUniformMeanSpeed = () => {
+    simulation.setUniformMeanSpeed()
+    setStats(simulation.statistics())
+  }
+
+  const alignVelocities = (axis: 0 | 1 | 2) => {
+    simulation.alignVelocitiesToAxis(axis)
+    setStats(simulation.statistics())
+  }
+
   const theory = useMemo(() => ({
     mostProbable: mostProbableSpeed(temperature, massAmu),
     mean: theoreticalMeanSpeed(temperature, massAmu),
@@ -163,16 +195,18 @@ function App() {
   }), [temperature, massAmu])
   const collisionTheory = useMemo(() => {
     const diameter = collisionDiameterAngstrom * 1e-10
-    const density = particleCount / (BOX_LENGTH_METERS ** 3)
+    const boxLengthMeters = boxLengthMicrometers * 1e-6
+    const density = particleCount / (boxLengthMeters ** 3)
     const meanFreePath = 1 / (Math.SQRT2 * Math.PI * diameter * diameter * density)
     return {
       meanFreePath,
-      knudsenNumber: meanFreePath / BOX_LENGTH_METERS,
+      knudsenNumber: meanFreePath / boxLengthMeters,
       gridDimension: Math.max(1, Math.min(16, Math.round(Math.cbrt(particleCount / 64)))),
     }
-  }, [collisionDiameterAngstrom, particleCount])
-  const numberDensityCm3 = particleCount / ((BOX_LENGTH_METERS * 100) ** 3)
-  const idealGasPressure = (particleCount / (BOX_LENGTH_METERS ** 3)) * BOLTZMANN * temperature
+  }, [boxLengthMicrometers, collisionDiameterAngstrom, particleCount])
+  const boxLengthMeters = boxLengthMicrometers * 1e-6
+  const numberDensityCm3 = particleCount / ((boxLengthMeters * 100) ** 3)
+  const idealGasPressure = (particleCount / (boxLengthMeters ** 3)) * BOLTZMANN * temperature
   const focusActive = highlightFast || highlightCold || highlightBand || trackParticle
   return (
     <main className="app-shell">
@@ -184,7 +218,7 @@ function App() {
         </div>
         <div className="topbar-meta">
           <span><i className="live-dot" /> LIVE MODEL</span>
-          <span>BOX <b>1.00 μm</b></span>
+          <span>BOX <b>{boxLengthMicrometers.toFixed(2)} μm</b></span>
           <button className="info-button" onClick={() => setShowInfo((value) => !value)} aria-expanded={showInfo}>i</button>
         </div>
       </header>
@@ -231,7 +265,19 @@ function App() {
             </button>
           </div>
           {showMomentumSpace ? (
-            <MomentumSpaceView simulation={simulation} />
+            <MomentumSpaceView
+              simulation={simulation}
+              highlightFast={highlightFast}
+              speedThreshold={speedThreshold}
+              highlightCold={highlightCold}
+              coldSpeedThreshold={coldSpeedThreshold}
+              highlightBand={highlightBand}
+              bandCenter={bandCenter}
+              bandHalfWidth={bandHalfWidth}
+              unfocusedOpacity={unfocusedOpacity}
+              trackParticle={trackParticle}
+              trackedParticleIndex={trackedParticleIndex}
+            />
           ) : (
             <div className="momentum-disabled">
               <i aria-hidden="true" />
@@ -253,7 +299,7 @@ function App() {
             <span className="sample-label">N = {particleCount.toLocaleString()}</span>
             <label className="chart-bins-control">
               <span>HISTOGRAM BINS</span>
-              <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => setBins(Number(event.target.value))} />
+              <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => setBins(Number(event.target.value))} onDoubleClick={() => setBins(100)} title="Double-click to reset" />
               <b>{bins}</b>
             </label>
           </div>
@@ -298,6 +344,10 @@ function App() {
               {playing ? 'Ⅱ' : '▶'}
             </button>
             <button onClick={reset} aria-label="Reset simulation">↻</button>
+            <button className="preset-button mean" onClick={setUniformMeanSpeed} title="Set every particle to the theoretical mean speed">MEAN</button>
+            <button className="preset-button axis" onClick={() => alignVelocities(0)} title="Align velocities with the x axis">X</button>
+            <button className="preset-button axis" onClick={() => alignVelocities(1)} title="Align velocities with the y axis">Y</button>
+            <button className="preset-button axis" onClick={() => alignVelocities(2)} title="Align velocities with the z axis">Z</button>
           </div>
           <label className="compact-slider">
             <span>TIME SCALE <b>{speedMultiplier < 0.01 ? speedMultiplier.toFixed(3) : speedMultiplier < 0.1 ? speedMultiplier.toFixed(2) : speedMultiplier.toFixed(1)}×</b></span>
@@ -308,7 +358,23 @@ function App() {
               step="0.05"
               value={Math.log10(speedMultiplier)}
               onChange={(event) => setSpeedMultiplier(10 ** Number(event.target.value))}
+              onDoubleClick={() => setSpeedMultiplier(0.01)}
+              title="Double-click to reset"
             />
+          </label>
+          <label className="compact-slider box-size-slider">
+            <span>BOX SIDE LENGTH <b>{boxLengthMicrometers.toFixed(2)} μm</b></span>
+            <input
+              type="range"
+              min="0.1"
+              max="1"
+              step="0.01"
+              value={boxLengthMicrometers}
+              onChange={(event) => applyBoxLength(Number(event.target.value))}
+              onDoubleClick={() => applyBoxLength(1)}
+              title="Double-click to reset"
+            />
+            <span className="slider-endpoints"><i>0.10 μm</i><i>1.00 μm</i></span>
           </label>
           <div className="simulation-dsmc">
             <Toggle label="DSMC collisions" checked={dsmcEnabled} onChange={setDsmcEnabled} />
@@ -325,10 +391,24 @@ function App() {
         <div className="control-block temperature-block">
           <span className="control-title">TEMPERATURE</span>
           <div className="input-with-unit">
-            <input type="number" min="5" max="5000" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} />
+            <input
+              type="number"
+              min="5"
+              max="5000"
+              value={temperatureDraft}
+              onChange={(event) => setTemperatureDraft(event.target.value)}
+              onBlur={commitTemperatureDraft}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+                if (event.key === 'Escape') {
+                  setTemperatureDraft(String(temperature))
+                  event.currentTarget.blur()
+                }
+              }}
+            />
             <span>K</span>
           </div>
-          <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} />
+          <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
           <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
           <div className="temperature-toggles">
             <Toggle label="Thermal bath" checked={thermostatEnabled} onChange={setThermostatEnabled} />
@@ -336,7 +416,7 @@ function App() {
           </div>
           <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
             <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
-            <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} />
+            <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} onDoubleClick={() => setThermostatRateNs(0.2)} title="Double-click to reset" />
           </label>
         </div>
 
@@ -364,12 +444,14 @@ function App() {
               step="0.1"
               value={collisionDiameterAngstrom}
               onChange={(event) => setCollisionDiameterAngstrom(Number(event.target.value))}
+              onDoubleClick={() => setCollisionDiameterAngstrom(species === 'Custom' ? COLLISION_DIAMETERS_ANGSTROM.Argon : COLLISION_DIAMETERS_ANGSTROM[species])}
+              title="Double-click to reset"
             />
             <span className="slider-endpoints"><i>0.1 Å</i><i>20 Å</i></span>
           </label>
           <label className="diameter-slider marker-size-slider">
             <span>PARTICLE MARKER SIZE <b>{particleMarkerSize.toFixed(2)}×</b></span>
-            <input type="range" min="0.25" max="2.5" step="0.05" value={particleMarkerSize} onChange={(event) => setParticleMarkerSize(Number(event.target.value))} />
+            <input type="range" min="0.25" max="2.5" step="0.05" value={particleMarkerSize} onChange={(event) => setParticleMarkerSize(Number(event.target.value))} onDoubleClick={() => setParticleMarkerSize(1)} title="Double-click to reset" />
             <span className="slider-endpoints"><i>small</i><i>large</i></span>
           </label>
           <small className="physical-scale-note">Visual marker size is independent of collision diameter.</small>
@@ -382,6 +464,8 @@ function App() {
               step="100"
               value={particleCount}
               onChange={(event) => resizeParticlePopulation(Number(event.target.value))}
+              onDoubleClick={() => resizeParticlePopulation(10_000)}
+              title="Double-click to reset"
             />
             <span className="slider-endpoints"><i>100</i><i>50,000</i></span>
           </label>
@@ -418,6 +502,8 @@ function App() {
               disabled={!highlightFast}
               value={speedThreshold}
               onChange={(event) => setSpeedThreshold(Number(event.target.value))}
+              onDoubleClick={() => setSpeedThreshold(500)}
+              title="Double-click to reset"
             />
             <small>{highlightedCount.toLocaleString()} particles above cutoff</small>
           </label>
@@ -432,23 +518,25 @@ function App() {
               disabled={!highlightCold}
               value={coldSpeedThreshold}
               onChange={(event) => setColdSpeedThreshold(Number(event.target.value))}
+              onDoubleClick={() => setColdSpeedThreshold(100)}
+              title="Double-click to reset"
             />
             <small>{coldHighlightedCount.toLocaleString()} particles below cutoff</small>
           </label>
           <div className="band-controls">
             <label className={`threshold-control ${highlightBand ? '' : 'disabled'}`}>
               <span>BAND CENTER <b>{bandCenter.toLocaleString()} m/s</b></span>
-              <input className="threshold-slider band-slider" type="range" min="0" max="3000" step="10" disabled={!highlightBand} value={bandCenter} onChange={(event) => setBandCenter(Number(event.target.value))} />
+              <input className="threshold-slider band-slider" type="range" min="0" max="3000" step="10" disabled={!highlightBand} value={bandCenter} onChange={(event) => setBandCenter(Number(event.target.value))} onDoubleClick={() => setBandCenter(400)} title="Double-click to reset" />
             </label>
             <label className={`threshold-control ${highlightBand ? '' : 'disabled'}`}>
               <span>HALF-WIDTH <b>±{bandHalfWidth} m/s</b></span>
-              <input className="threshold-slider band-slider" type="range" min="1" max="200" step="1" disabled={!highlightBand} value={bandHalfWidth} onChange={(event) => setBandHalfWidth(Number(event.target.value))} />
+              <input className="threshold-slider band-slider" type="range" min="1" max="200" step="1" disabled={!highlightBand} value={bandHalfWidth} onChange={(event) => setBandHalfWidth(Number(event.target.value))} onDoubleClick={() => setBandHalfWidth(10)} title="Double-click to reset" />
               <small>{bandHighlightedCount.toLocaleString()} particles in {Math.max(0, bandCenter - bandHalfWidth)}–{bandCenter + bandHalfWidth} m/s</small>
             </label>
           </div>
           <label className={`threshold-control opacity-control ${focusActive ? '' : 'disabled'}`}>
             <span>OTHER PARTICLES <b>{Math.round(unfocusedOpacity * 100)}% opacity</b></span>
-            <input className="threshold-slider" type="range" min="0.02" max="0.75" step="0.01" disabled={!focusActive} value={unfocusedOpacity} onChange={(event) => setUnfocusedOpacity(Number(event.target.value))} />
+            <input className="threshold-slider" type="range" min="0.02" max="0.75" step="0.01" disabled={!focusActive} value={unfocusedOpacity} onChange={(event) => setUnfocusedOpacity(Number(event.target.value))} onDoubleClick={() => setUnfocusedOpacity(0.18)} title="Double-click to reset" />
           </label>
         </div>
 

@@ -287,7 +287,8 @@ export function SimulationView(props: SimulationViewProps) {
         }
 
         if (trackPositionRef.current) {
-          trackPositionRef.current.textContent = `${current.simulation.positions[positionIndex].toFixed(3)}, ${current.simulation.positions[positionIndex + 1].toFixed(3)}, ${current.simulation.positions[positionIndex + 2].toFixed(3)} μm`
+          const boxLengthMicrometers = current.simulation.boxLengthMeters * 1e6
+          trackPositionRef.current.textContent = `${(current.simulation.positions[positionIndex] * boxLengthMicrometers).toFixed(3)}, ${(current.simulation.positions[positionIndex + 1] * boxLengthMicrometers).toFixed(3)}, ${(current.simulation.positions[positionIndex + 2] * boxLengthMicrometers).toFixed(3)} μm`
         }
         if (trackSpeedRef.current) {
           trackSpeedRef.current.textContent = `${current.simulation.speeds[trackedIndex].toFixed(1)} m/s`
@@ -410,7 +411,7 @@ export function SimulationView(props: SimulationViewProps) {
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
-      <div className="scale-note">1 μm box · particles enlarged for visibility</div>
+      <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · particles enlarged for visibility</div>
       {props.thermostatEnabled && props.singleFaceBath && (
         <div className="face-contact-badge"><i /> +X THERMAL CONTACT</div>
       )}

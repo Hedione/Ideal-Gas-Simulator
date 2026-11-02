@@ -44,7 +44,7 @@ npm run build
 
 ## Physical model
 
-- The box has a physical side length of 1 μm. Display coordinates are normalized to `[0, 1]`, while velocities and elapsed time remain in SI units.
+- The box has a user-selectable physical side length from 0.10–1.00 μm. Display coordinates are normalized to `[0, 1]`, while wall transit, collision cells, density, pressure, mean free path, velocities, and elapsed time remain in SI units.
 - Each velocity component is independently sampled from `Normal(0, k_B T / m)`. Scalar speeds therefore follow the three-dimensional Maxwell–Boltzmann law.
 - Collisionless mode uses noninteracting points. Optional hard-sphere DSMC mode performs stochastic, spatially local binary collisions that conserve pair momentum and kinetic energy. Wall collisions are perfectly elastic, and a triangle-wave coordinate fold handles any number of wall crossings in one update.
 - At 1×, the visual clock advances 20 ns of physical time per wall-clock second; the current 0.01× default advances about 0.2 ns per second. This is a visualization scale, not a modification of the mechanics.
@@ -68,12 +68,14 @@ When the bath and DSMC are disabled, wall reflections only reverse velocity comp
 - Temperature from 5–5,000 K with wall-mediated thermal relaxation
 - Helium, neon, argon, nitrogen (N₂), xenon, and a Custom option that reveals the particle-mass input
 - 100–50,000 simulated/rendered particles using a continuous count slider, with 10,000 at startup. Decreasing the count removes a uniformly random subset without resetting surviving particles; increasing it preserves the existing ensemble and adds uniformly positioned particles with Maxwell–Boltzmann velocities at the current target temperature.
-- Play/pause, reset, a logarithmic 0.001×–3× physical time scale (0.01× default), wall-coupling rate, and histogram bin count beside the chart (100 bins by default)
+- Play/pause, reset, a logarithmic 0.001×–3× physical time scale (0.01× default), a 0.10–1.00 μm box-side slider, wall-coupling rate, and histogram bin count beside the chart (100 bins by default)
+- Nonequilibrium presets that set every particle to the theoretical mean speed or align all velocity vectors with the x, y, or z axis while preserving their signs and kinetic energy; each preset restarts the experiment clock and collision counters
 - Permanently enabled speed coloring, analytical curve, characteristic-speed markers, and reference grid
 - Six-face thermal-wall contact with an optional restriction to the subtly highlighted +X wall
 - Spatial hard-sphere DSMC collisions enabled by default, with the toggle and live status directly below time scale in the Simulation module; species collision-diameter presets, a 0.1–20 Å collision-diameter slider, adaptive collision cells, and live mean-free-path/Knudsen diagnostics remain available
 - An independent 0.25×–2.5× visual marker-size slider with automatic population-density compensation; collision diameter no longer changes rendered marker size
-- Independent hot-, cold-, and speed-band focus modes, plus random single-particle tracking. The cold cutoff spans 0–500 m/s and the hot cutoff spans 0–5,000 m/s. Speed-band focus selects particles within an adjustable center ± half-width window. A shared opacity control adjusts all nonfocused particles, and matching dashed cutoff markers appear on the speed-distribution chart.
+- Independent hot-, cold-, and speed-band focus modes, plus random single-particle tracking. The cold cutoff spans 0–500 m/s and the hot cutoff spans 0–5,000 m/s. Speed-band focus selects particles within an adjustable center ± half-width window. A shared opacity control adjusts all nonfocused particles, matching highlights appear in physical and momentum space, and matching dashed cutoff markers appear on the speed-distribution chart.
+- Double-click reset for every slider, plus a temperature field that accepts an empty draft and commits only on Enter or blur
 - A toggleable, freely rotatable 3D momentum-space panel positioned between the equally tall physical-space and speed-distribution panels. The physical-space panel receives the largest width allocation, while the distribution panel uses a compact 3×3 observable grid. Momentum space contains every particle, is normalized to a ±5 thermal-momentum-standard-deviation cube, and refreshes at a reduced data cadence for performance.
 - Live population indicators for number density in particles/cm³ and ideal-gas pressure in pascals
 - Random single-particle tracking with a box-centered camera, trajectory trail, live position/speed readout, muted background particles, and distinct indicators for elastic-wall, thermal-wall, and DSMC collisions
@@ -83,7 +85,7 @@ Particle markers are intentionally enlarged, user-adjustable, and are not to sca
 
 ## Tests
 
-The Vitest suite checks Gaussian component statistics, mean-square and mean speeds, histogram normalization, numerical normalization of the analytical density, elastic wall energy conservation, temperature and mass scaling, six-wall thermal relaxation, absence of interior bath perturbations, thermal-wall equilibrium, DSMC pair conservation, DSMC-driven isotropization, mean-free-path diagnostics, bath-off energy conservation, and buffer integrity. Statistical tests use deterministic pseudorandom samples and finite-sample tolerances rather than exact equality.
+The Vitest suite checks Gaussian component statistics, mean-square and mean speeds, histogram normalization, numerical normalization of the analytical density, nonequilibrium presets, variable box scaling, elastic wall energy conservation, temperature and mass scaling, six-wall thermal relaxation, absence of interior bath perturbations, thermal-wall equilibrium, DSMC pair conservation, DSMC-driven isotropization, mean-free-path diagnostics, bath-off energy conservation, and buffer integrity. Statistical tests use deterministic pseudorandom samples and finite-sample tolerances rather than exact equality.
 
 ## Implementation notes
 

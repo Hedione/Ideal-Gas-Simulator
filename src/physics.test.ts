@@ -162,6 +162,48 @@ describe('distribution calculations', () => {
   })
 })
 
+describe('nonequilibrium controls', () => {
+  it('sets every particle to the theoretical mean speed without changing directions', () => {
+    const simulation = new GasSimulation(2_000, 450, 39.948, seededRandom(301))
+    const firstDirection = Array.from(simulation.velocities.slice(0, 3))
+    const firstMagnitude = Math.hypot(...firstDirection)
+    simulation.elapsedTime = 3e-9
+    simulation.wallCollisionCounts.fill(4)
+
+    simulation.setUniformMeanSpeed()
+
+    const expected = theoreticalMeanSpeed(450, 39.948)
+    for (const speed of simulation.speeds) expect(speed / expected).toBeCloseTo(1, 6)
+    const newMagnitude = Math.hypot(
+      simulation.velocities[0],
+      simulation.velocities[1],
+      simulation.velocities[2],
+    )
+    for (let axis = 0; axis < 3; axis += 1) {
+      expect(simulation.velocities[axis] / newMagnitude).toBeCloseTo(firstDirection[axis] / firstMagnitude, 6)
+    }
+    expect(simulation.elapsedTime).toBe(0)
+    expect(simulation.wallCollisionCounts.every((count) => count === 0)).toBe(true)
+  })
+
+  it('aligns velocities to one axis while preserving every particle speed and total energy', () => {
+    const simulation = new GasSimulation(2_000, 300, 39.948, seededRandom(302))
+    const speedsBefore = simulation.speeds.slice()
+    const energyBefore = simulation.statistics().totalKineticEnergy
+
+    simulation.alignVelocitiesToAxis(1)
+
+    for (let particle = 0; particle < simulation.count; particle += 1) {
+      const index = particle * 3
+      expect(simulation.velocities[index]).toBe(0)
+      expect(simulation.velocities[index + 2]).toBe(0)
+      expect(Math.abs(simulation.velocities[index + 1]) / speedsBefore[particle]).toBeCloseTo(1, 6)
+      expect(simulation.speeds[particle] / speedsBefore[particle]).toBeCloseTo(1, 6)
+    }
+    expect(simulation.statistics().totalKineticEnergy / energyBefore).toBeCloseTo(1, 6)
+  })
+})
+
 describe('dynamics', () => {
   it('an equal-mass DSMC scatter conserves pair momentum and kinetic energy', () => {
     const velocities = new Float32Array([320, -45, 110, -140, 90, -70])
@@ -209,6 +251,29 @@ describe('dynamics', () => {
     const expected = 1 / (Math.SQRT2 * Math.PI * diameter * diameter * numberDensity)
     expect(simulation.collisionDiagnostics.meanFreePath / expected).toBeCloseTo(1, 10)
     expect(simulation.collisionDiagnostics.knudsenNumber).toBeCloseTo(expected / 1e-6, 8)
+  })
+
+  it('uses the selected physical box length for wall transit and collision scales', () => {
+    const simulation = new GasSimulation(30_000, 300, 39.948, seededRandom(104))
+    const boxLength = 0.5e-6
+    const diameter = 3.542e-10
+    simulation.setBoxLength(boxLength)
+    simulation.advance(1e-11, 0, false, true, diameter)
+
+    const numberDensity = simulation.count / (boxLength ** 3)
+    const expectedMeanFreePath = 1 / (Math.SQRT2 * Math.PI * diameter * diameter * numberDensity)
+    expect(simulation.collisionDiagnostics.meanFreePath / expectedMeanFreePath).toBeCloseTo(1, 10)
+    expect(simulation.collisionDiagnostics.knudsenNumber).toBeCloseTo(expectedMeanFreePath / boxLength, 8)
+
+    const wallSimulation = new GasSimulation(1, 300, 39.948, seededRandom(105))
+    wallSimulation.setBoxLength(boxLength)
+    wallSimulation.positions.set([0.5, 0.5, 0.5])
+    wallSimulation.velocities.set([100, 0, 0])
+    wallSimulation.speeds[0] = 100
+    wallSimulation.advance(4e-9)
+    expect(wallSimulation.positions[0]).toBeCloseTo(0.7, 6)
+    expect(wallSimulation.velocities[0]).toBeCloseTo(-100, 6)
+    expect(wallSimulation.wallCollisionCounts[0]).toBe(1)
   })
 
   it('DSMC collisions isotropize a two-stream nonequilibrium ensemble without a bath', () => {
