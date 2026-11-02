@@ -16,6 +16,10 @@ interface SimulationViewProps {
   particleMarkerDiameterAngstrom: number
   particleOcclusionEnabled: boolean
   knudsenNumber: number
+  brownianEnabled: boolean
+  brownianDiameterAngstrom: number
+  brownianMassAmu: number
+  brownianFocus: boolean
   highlightFast: boolean
   speedThreshold: number
   highlightCold: boolean
@@ -146,6 +150,26 @@ function formatKnudsenNumber(value: number): string {
   return value.toFixed(3)
 }
 
+function getPackingRegime(packingFraction: number): { key: string; label: string; detail: string } {
+  if (packingFraction < 0.01) {
+    return { key: 'credible', label: 'DILUTE-GAS REGIME', detail: 'φ < 1% · dilute DSMC conditions' }
+  }
+  if (packingFraction < 0.05) {
+    return { key: 'caution', label: 'DENSE-GAS CAUTION', detail: '1% ≤ φ < 5% · correlations may matter' }
+  }
+  if (packingFraction < 0.3) {
+    return { key: 'warning', label: 'OUTSIDE DILUTE LIMIT', detail: '5% ≤ φ < 30% · numerical stress test' }
+  }
+  return { key: 'severe', label: 'PHYSICALLY DUBIOUS PACKING', detail: 'φ ≥ 30% · ideal-gas model invalid' }
+}
+
+function formatPackingFraction(value: number): string {
+  const percent = value * 100
+  if (percent < 0.001) return `${percent.toExponential(2)}%`
+  if (percent < 10) return `${percent.toFixed(3)}%`
+  return `${percent.toFixed(1)}%`
+}
+
 export function SimulationView(props: SimulationViewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const trackPositionRef = useRef<HTMLSpanElement>(null)
@@ -153,6 +177,8 @@ export function SimulationView(props: SimulationViewProps) {
   const collisionIndicatorRef = useRef<HTMLDivElement>(null)
   const lengthReferenceLabelRef = useRef<HTMLSpanElement>(null)
   const lengthReferenceBarRef = useRef<HTMLElement>(null)
+  const orientationLinesRef = useRef<Array<SVGLineElement | null>>([])
+  const orientationLabelsRef = useRef<Array<SVGTextElement | null>>([])
   const settingsRef = useRef(props)
   settingsRef.current = props
 
@@ -232,6 +258,36 @@ export function SimulationView(props: SimulationViewProps) {
     trackedTrail.renderOrder = 9
     trackedTrail.visible = false
     scene.add(trackedTrail)
+
+    const brownianGeometry = new THREE.SphereGeometry(0.5, 28, 20)
+    const brownianMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffc76b,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: true,
+    })
+    const brownianTracer = new THREE.Mesh(brownianGeometry, brownianMaterial)
+    const brownianOutline = new THREE.Mesh(
+      brownianGeometry,
+      new THREE.MeshBasicMaterial({ color: 0xffe0a3, wireframe: true, transparent: true, opacity: 0.28 }),
+    )
+    brownianOutline.scale.setScalar(1.025)
+    const brownianGroup = new THREE.Group()
+    brownianGroup.add(brownianTracer, brownianOutline)
+    brownianGroup.visible = false
+    scene.add(brownianGroup)
+
+    const brownianTrailPositions = new Float32Array(maximumTrailSegments * 6)
+    const brownianTrailGeometry = new THREE.BufferGeometry()
+    const brownianTrailAttribute = new THREE.BufferAttribute(brownianTrailPositions, 3)
+    brownianTrailAttribute.setUsage(THREE.DynamicDrawUsage)
+    brownianTrailGeometry.setAttribute('position', brownianTrailAttribute)
+    brownianTrailGeometry.setDrawRange(0, 0)
+    const brownianTrailMaterial = new THREE.LineBasicMaterial({ color: 0xffc76b, transparent: true, opacity: 0.62, depthTest: false })
+    const brownianTrail = new THREE.LineSegments(brownianTrailGeometry, brownianTrailMaterial)
+    brownianTrail.renderOrder = 8
+    brownianTrail.visible = false
+    scene.add(brownianTrail)
 
     const box = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
@@ -333,10 +389,22 @@ export function SimulationView(props: SimulationViewProps) {
     let lastThermalContacts = 0
     let lastParticleCollisions = 0
     let collisionIndicatorUntil = 0
+    let brownianTrailSegmentCount = 0
+    let brownianWasEnabled = false
+    let previousBrownianPosition: THREE.Vector3 | null = null
     const trackedPosition = new THREE.Vector3()
+    const brownianPosition = new THREE.Vector3()
     const viewTarget = new THREE.Vector3()
     const drawingBufferSize = new THREE.Vector2()
     const boxCenterInCameraSpace = new THREE.Vector3()
+    const cameraQuaternion = new THREE.Quaternion()
+    const inverseCameraQuaternion = new THREE.Quaternion()
+    const orientationVector = new THREE.Vector3()
+    const orientationAxes = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 0, 1),
+    ]
     const animate = (now: number) => {
       animationFrame = requestAnimationFrame(animate)
       const current = settingsRef.current
@@ -354,6 +422,18 @@ export function SimulationView(props: SimulationViewProps) {
         depthPoints.geometry = geometry
         points.geometry = geometry
         previousGeometry.dispose()
+      }
+      const requestedBrownianDiameter = current.brownianDiameterAngstrom * 1e-10
+      const brownianConfigurationChanged =
+        current.simulation.brownianEnabled !== current.brownianEnabled ||
+        Math.abs(current.simulation.brownianDiameterMeters - requestedBrownianDiameter) > 1e-18
+      current.simulation.setBrownianObject(
+        current.brownianEnabled,
+        requestedBrownianDiameter,
+        current.brownianMassAmu,
+      )
+      if (brownianConfigurationChanged) {
+        ;(geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
       }
       if (current.playing) {
         const physicalDt = wallDt * 1e-10 * current.speedMultiplier
@@ -391,6 +471,47 @@ export function SimulationView(props: SimulationViewProps) {
       secondaryThermalFace.visible = showSelectedThermalFaces && current.thermalBathMode === 'two' && Boolean(secondaryWall)
       if (primaryWall) placeThermalFace(primaryThermalFace, primaryWall)
       if (secondaryWall) placeThermalFace(secondaryThermalFace, secondaryWall)
+
+      brownianGroup.visible = current.brownianEnabled
+      brownianTrail.visible = current.brownianEnabled
+      if (current.brownianEnabled) {
+        const diameter = current.brownianDiameterAngstrom * 1e-10 / current.simulation.boxLengthMeters
+        brownianGroup.scale.setScalar(diameter)
+        brownianPosition.set(
+          current.simulation.brownianPosition[0] - 0.5,
+          current.simulation.brownianPosition[1] - 0.5,
+          current.simulation.brownianPosition[2] - 0.5,
+        )
+        brownianGroup.position.copy(brownianPosition)
+        if (!brownianWasEnabled) {
+          brownianTrailSegmentCount = 0
+          brownianTrailGeometry.setDrawRange(0, 0)
+          previousBrownianPosition = brownianPosition.clone()
+        } else if (frame % 2 === 0 && previousBrownianPosition) {
+          const distance = previousBrownianPosition.distanceTo(brownianPosition)
+          if (distance > 1e-7 && distance < 0.4) {
+            let offset = brownianTrailSegmentCount * 6
+            if (brownianTrailSegmentCount >= maximumTrailSegments) {
+              brownianTrailPositions.copyWithin(0, 6)
+              offset = (maximumTrailSegments - 1) * 6
+            } else {
+              brownianTrailSegmentCount += 1
+            }
+            brownianTrailPositions[offset] = previousBrownianPosition.x
+            brownianTrailPositions[offset + 1] = previousBrownianPosition.y
+            brownianTrailPositions[offset + 2] = previousBrownianPosition.z
+            brownianTrailPositions[offset + 3] = brownianPosition.x
+            brownianTrailPositions[offset + 4] = brownianPosition.y
+            brownianTrailPositions[offset + 5] = brownianPosition.z
+            brownianTrailAttribute.needsUpdate = true
+            brownianTrailGeometry.setDrawRange(0, brownianTrailSegmentCount * 2)
+          }
+          previousBrownianPosition.copy(brownianPosition)
+        }
+      } else {
+        previousBrownianPosition = null
+      }
+      brownianWasEnabled = current.brownianEnabled
 
       if (current.trackParticle && current.simulation.count > 0) {
         const trackedIndex = Math.max(0, Math.min(current.simulation.count - 1, current.trackedParticleIndex))
@@ -484,8 +605,13 @@ export function SimulationView(props: SimulationViewProps) {
           const insideBand = current.highlightBand && Math.abs(speed - current.bandCenter) <= current.bandHalfWidth
           const focusActive = current.highlightFast || current.highlightCold || current.highlightBand
           const isTracked = i === trackedColorIndex
-          highlights[i] = current.trackParticle ? (isTracked ? 1 : 0) : focusActive ? (aboveThreshold || belowThreshold || insideBand ? 1 : 0) : 1
-          if (isTracked) {
+          const brownianFocusActive = current.brownianEnabled && current.brownianFocus
+          highlights[i] = brownianFocusActive ? 0 : current.trackParticle ? (isTracked ? 1 : 0) : focusActive ? (aboveThreshold || belowThreshold || insideBand ? 1 : 0) : 1
+          if (brownianFocusActive) {
+            colors[offset] = 0.25
+            colors[offset + 1] = 0.28
+            colors[offset + 2] = 0.29
+          } else if (isTracked) {
             colors[offset] = 0.76
             colors[offset + 1] = 0.96
             colors[offset + 2] = 1
@@ -527,6 +653,25 @@ export function SimulationView(props: SimulationViewProps) {
       const referencePixels = referenceMeters / current.simulation.boxLengthMeters * cssPixelsPerWorldUnit
       if (lengthReferenceBarRef.current) lengthReferenceBarRef.current.style.width = `${referencePixels.toFixed(2)}px`
       if (lengthReferenceLabelRef.current) lengthReferenceLabelRef.current.textContent = formatReferenceLength(referenceMeters)
+      camera.getWorldQuaternion(cameraQuaternion)
+      inverseCameraQuaternion.copy(cameraQuaternion).invert()
+      for (let axis = 0; axis < 3; axis += 1) {
+        orientationVector.copy(orientationAxes[axis]).applyQuaternion(inverseCameraQuaternion)
+        const x = 32 + orientationVector.x * 22
+        const y = 32 - orientationVector.y * 22
+        const line = orientationLinesRef.current[axis]
+        const label = orientationLabelsRef.current[axis]
+        if (line) {
+          line.setAttribute('x2', x.toFixed(2))
+          line.setAttribute('y2', y.toFixed(2))
+          line.style.opacity = String(0.45 + 0.55 * (orientationVector.z + 1) * 0.5)
+        }
+        if (label) {
+          label.setAttribute('x', (32 + orientationVector.x * 27).toFixed(2))
+          label.setAttribute('y', (35 - orientationVector.y * 27).toFixed(2))
+          label.style.opacity = String(0.55 + 0.45 * (orientationVector.z + 1) * 0.5)
+        }
+      }
       renderer.render(scene, camera)
     }
     animationFrame = requestAnimationFrame(animate)
@@ -548,6 +693,11 @@ export function SimulationView(props: SimulationViewProps) {
       ;(secondaryThermalFace.material as THREE.Material).dispose()
       trailGeometry.dispose()
       trailMaterial.dispose()
+      brownianGeometry.dispose()
+      brownianMaterial.dispose()
+      ;(brownianOutline.material as THREE.Material).dispose()
+      brownianTrailGeometry.dispose()
+      brownianTrailMaterial.dispose()
       disposeReferenceGrid(coarseGrid)
       disposeReferenceGrid(fineGrid)
       renderer.dispose()
@@ -556,6 +706,9 @@ export function SimulationView(props: SimulationViewProps) {
   }, [props.simulation])
 
   const flowRegime = getFlowRegime(props.knudsenNumber)
+  const numberDensity = props.simulation.count / (props.simulation.boxLengthMeters ** 3)
+  const packingFraction = numberDensity * (Math.PI / 6) * (props.collisionDiameterAngstrom * 1e-10) ** 3
+  const packingStatus = getPackingRegime(packingFraction)
 
   return (
     <div className="simulation-shell">
@@ -564,9 +717,15 @@ export function SimulationView(props: SimulationViewProps) {
           <span className="eyebrow">LIVE PARTICLE FIELD</span>
           <h2>Microscopic view</h2>
         </div>
-        <div className={`flow-regime-indicator ${flowRegime.key}`} title={`Current Knudsen number: ${props.knudsenNumber}`}>
-          <b>{flowRegime.label}</b>
-          <small>{flowRegime.criterion} · Kn = {formatKnudsenNumber(props.knudsenNumber)}</small>
+        <div className="gas-diagnostic-stack">
+          <div className={`flow-regime-indicator ${flowRegime.key}`} title={`Current Knudsen number: ${props.knudsenNumber}`}>
+            <b>{flowRegime.label}</b>
+            <small>{flowRegime.criterion} · Kn = {formatKnudsenNumber(props.knudsenNumber)}</small>
+          </div>
+          <div className={`packing-status ${packingStatus.key}`} role={packingStatus.key === 'credible' ? 'status' : 'alert'}>
+            <div><b>{packingStatus.label}</b><span>φ = {formatPackingFraction(packingFraction)}</span></div>
+            <small>{packingStatus.detail}</small>
+          </div>
         </div>
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
@@ -589,17 +748,28 @@ export function SimulationView(props: SimulationViewProps) {
           <div ref={collisionIndicatorRef} className="collision-indicator">○ NO RECENT COLLISION</div>
         </div>
       )}
+      <div className="orientation-gizmo" aria-label="Camera-relative x, y, z axes">
+        <svg viewBox="0 0 64 64" role="img">
+          <circle cx="32" cy="32" r="2" />
+          {(['x', 'y', 'z'] as const).map((axis, index) => (
+            <g key={axis} className={`axis-${axis}`}>
+              <line ref={(node) => { orientationLinesRef.current[index] = node }} x1="32" y1="32" x2="32" y2="32" />
+              <text ref={(node) => { orientationLabelsRef.current[index] = node }} x="32" y="35">{axis}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
       <div className="length-reference" aria-label="Live physical length reference">
         <span ref={lengthReferenceLabelRef}>—</span>
         <i ref={lengthReferenceBarRef} />
       </div>
       <div
-        className={`color-key ${props.trackParticle ? 'tracking-key' : props.highlightBand ? 'band-threshold-key' : props.highlightFast && props.highlightCold ? 'dual-threshold-key' : props.highlightFast ? 'threshold-key' : props.highlightCold ? 'cold-threshold-key' : ''}`}
-        aria-label={props.trackParticle ? 'Tracked particle color legend' : props.highlightBand ? 'Speed band color legend' : 'Particle speed color legend'}
+        className={`color-key ${props.brownianEnabled && props.brownianFocus ? 'brownian-key' : props.trackParticle ? 'tracking-key' : props.highlightBand ? 'band-threshold-key' : props.highlightFast && props.highlightCold ? 'dual-threshold-key' : props.highlightFast ? 'threshold-key' : props.highlightCold ? 'cold-threshold-key' : ''}`}
+        aria-label={props.brownianEnabled && props.brownianFocus ? 'Brownian tracer color legend' : props.trackParticle ? 'Tracked particle color legend' : props.highlightBand ? 'Speed band color legend' : 'Particle speed color legend'}
       >
-        <span>{props.trackParticle ? 'others' : props.highlightBand ? `${Math.max(0, props.bandCenter - props.bandHalfWidth)}` : props.highlightCold ? `< ${props.coldSpeedThreshold} m/s` : props.highlightFast ? `≤ ${props.speedThreshold} m/s` : 'slow'}</span>
+        <span>{props.brownianEnabled && props.brownianFocus ? 'gas' : props.trackParticle ? 'others' : props.highlightBand ? `${Math.max(0, props.bandCenter - props.bandHalfWidth)}` : props.highlightCold ? `< ${props.coldSpeedThreshold} m/s` : props.highlightFast ? `≤ ${props.speedThreshold} m/s` : 'slow'}</span>
         <i />
-        <span>{props.trackParticle ? 'tracked' : props.highlightBand ? `${props.bandCenter + props.bandHalfWidth} m/s` : props.highlightFast ? `> ${props.speedThreshold} m/s` : props.highlightCold ? 'warmer' : 'fast'}</span>
+        <span>{props.brownianEnabled && props.brownianFocus ? 'tracer' : props.trackParticle ? 'tracked' : props.highlightBand ? `${props.bandCenter + props.bandHalfWidth} m/s` : props.highlightFast ? `> ${props.speedThreshold} m/s` : props.highlightCold ? 'warmer' : 'fast'}</span>
       </div>
     </div>
   )

@@ -82,6 +82,10 @@ function App() {
   const [trackedParticleIndex, setTrackedParticleIndex] = useState(0)
   const [showMomentumSpace, setShowMomentumSpace] = useState(true)
   const [momentumPointSize, setMomentumPointSize] = useState(1)
+  const [brownianEnabled, setBrownianEnabled] = useState(false)
+  const [brownianDiameterAngstrom, setBrownianDiameterAngstrom] = useState(100)
+  const [brownianMassAmu, setBrownianMassAmu] = useState(1e6)
+  const [brownianFocus, setBrownianFocus] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [stats, setStats] = useState<SimulationStats>(() => simulation.statistics())
 
@@ -126,6 +130,20 @@ function App() {
       setTrackedParticleIndex(Math.floor(Math.random() * simulation.count))
     }
   }, [simulation, trackParticle])
+
+  useEffect(() => {
+    const maximumDiameter = Math.max(5, Math.min(500, boxLengthMicrometers * 1e4 * 0.8))
+    setBrownianDiameterAngstrom((value) => Math.min(value, maximumDiameter))
+  }, [boxLengthMicrometers])
+
+  useEffect(() => {
+    if (!showInfo) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowInfo(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [showInfo])
 
   const applyTemperature = useCallback((next: number) => {
     const value = Math.max(5, Math.min(5000, Number.isFinite(next) ? next : 300))
@@ -304,6 +322,10 @@ function App() {
     setTrackedParticleIndex(0)
     setShowMomentumSpace(true)
     setMomentumPointSize(1)
+    setBrownianEnabled(false)
+    setBrownianDiameterAngstrom(100)
+    setBrownianMassAmu(1e6)
+    setBrownianFocus(false)
     setShowInfo(false)
     setStats(nextSimulation.statistics())
   }
@@ -358,8 +380,8 @@ function App() {
     return walls
   }, [effectiveSecondaryWallTemperature, primaryWallAxis, primaryWallPositive, secondaryWallAxis, secondaryWallPositive, temperature, thermalBathMode])
 
-  const setUniformMeanSpeed = () => {
-    simulation.setUniformMeanSpeed()
+  const setUniformRmsSpeed = () => {
+    simulation.setUniformRmsSpeed()
     setStats(simulation.statistics())
   }
 
@@ -386,7 +408,8 @@ function App() {
   const boxLengthMeters = boxLengthMicrometers * 1e-6
   const numberDensityM3 = particleCount / (boxLengthMeters ** 3)
   const idealGasPressure = numberDensityM3 * BOLTZMANN * temperature
-  const focusActive = highlightFast || highlightCold || highlightBand || trackParticle
+  const maximumBrownianDiameterAngstrom = Math.max(5, Math.min(500, boxLengthMicrometers * 1e4 * 0.8))
+  const focusActive = highlightFast || highlightCold || highlightBand || trackParticle || (brownianEnabled && brownianFocus)
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -403,11 +426,21 @@ function App() {
       </header>
 
       {showInfo && (
-        <aside className="info-banner">
-          <button onClick={() => setShowInfo(false)} aria-label="Close information">×</button>
-          <strong>What you’re seeing</strong>
-          <p>Each velocity component is sampled independently from a Gaussian with variance k<sub>B</sub>T/m. Thermal exchange occurs only at wall contacts: all six faces by default, or one or two user-selected faces. Optional DSMC collisions conserve pair momentum and energy while allowing collisional relaxation.</p>
-        </aside>
+        <div className="info-modal-backdrop" role="presentation" onMouseDown={() => setShowInfo(false)}>
+          <section className="info-modal" role="dialog" aria-modal="true" aria-labelledby="simulation-info-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="info-modal-close" onClick={() => setShowInfo(false)} aria-label="Close information">×</button>
+            <span className="eyebrow">ABOUT THE MODEL</span>
+            <h2 id="simulation-info-title">A microscopic laboratory for an ideal gas</h2>
+            <p>This browser simulation follows a three-dimensional ensemble of classical particles inside a controllable box. It connects individual trajectories and collisions to temperature, pressure, velocity distributions, mean free path, and flow regime.</p>
+            <div className="info-modal-grid">
+              <article><b>MOLECULAR MOTION</b><p>Particle velocities begin with a Maxwell–Boltzmann distribution. The physical and momentum-space views show the same live ensemble from complementary perspectives.</p></article>
+              <article><b>COLLISIONS</b><p>Optional DSMC hard-sphere collisions exchange momentum and energy locally while conserving both quantities for each gas-particle pair.</p></article>
+              <article><b>THERMAL WALLS</b><p>Heat enters or leaves only through eligible wall contacts. Diffuse reflection thermally resamples an outgoing velocity; specular reflection conserves particle speed.</p></article>
+              <article><b>MODEL LIMITS</b><p>The simulator is a dilute classical-gas model, not molecular dynamics. The packing warning identifies settings where finite-size correlations make the ideal-gas interpretation physically dubious.</p></article>
+            </div>
+            <p className="info-modal-footnote">All calculations run locally in the browser. Controls alter the model in real time; diagnostic focus modes change only the visualization.</p>
+          </section>
+        </div>
       )}
 
       <section className="workspace">
@@ -424,6 +457,10 @@ function App() {
           particleMarkerDiameterAngstrom={particleMarkerDiameterAngstrom}
           particleOcclusionEnabled={particleOcclusionEnabled}
           knudsenNumber={collisionTheory.knudsenNumber}
+          brownianEnabled={brownianEnabled}
+          brownianDiameterAngstrom={Math.min(brownianDiameterAngstrom, maximumBrownianDiameterAngstrom)}
+          brownianMassAmu={brownianMassAmu}
+          brownianFocus={brownianFocus}
           highlightFast={highlightFast}
           speedThreshold={speedThreshold}
           highlightCold={highlightCold}
@@ -591,9 +628,9 @@ function App() {
           <div className="starting-conditions">
             <span>STARTING CONDITIONS</span>
             <div className="starting-condition-grid">
-              <button onClick={setUniformMeanSpeed} title="Give every particle the theoretical mean speed while preserving its direction">
-                <b>MEAN SPEED</b>
-                <small>all |v| = ⟨v⟩</small>
+              <button onClick={setUniformRmsSpeed} title="Give every particle the ensemble RMS speed while preserving total kinetic energy and direction">
+                <b>RMS SPEED</b>
+                <small>equal |v| · energy fixed</small>
               </button>
               <button onClick={() => alignVelocities(0)} title="Align every velocity with the positive or negative x axis">
                 <b>X-ALIGNED</b>
@@ -608,6 +645,62 @@ function App() {
                 <small>velocity along ±z</small>
               </button>
             </div>
+          </div>
+          <div className="brownian-controls">
+            <span>BROWNIAN MOTION</span>
+            <button
+              type="button"
+              className={`brownian-master ${brownianEnabled ? 'active' : ''}`}
+              aria-pressed={brownianEnabled}
+              onClick={() => {
+                if (brownianEnabled) setBrownianFocus(false)
+                setBrownianEnabled(!brownianEnabled)
+              }}
+            >
+              <b>MASSIVE TRACER {brownianEnabled ? 'INSERTED' : 'OFF'}</b>
+              <small>{brownianEnabled ? 'elastic gas impacts drive its motion' : 'insert a hard sphere into the gas'}</small>
+            </button>
+            {brownianEnabled && (
+              <div className="brownian-settings">
+                <label>
+                  <span>TRACER DIAMETER <b>{brownianDiameterAngstrom.toFixed(0)} Å</b></span>
+                  <input
+                    type="range"
+                    min="5"
+                    max={maximumBrownianDiameterAngstrom}
+                    step="1"
+                    value={brownianDiameterAngstrom}
+                    onChange={(event) => setBrownianDiameterAngstrom(Number(event.target.value))}
+                    onDoubleClick={() => setBrownianDiameterAngstrom(Math.min(100, maximumBrownianDiameterAngstrom))}
+                    title="Double-click to reset"
+                  />
+                  <small>5 Å · max {maximumBrownianDiameterAngstrom.toFixed(0)} Å for this box</small>
+                </label>
+                <label>
+                  <span>TRACER MASS <b>{brownianMassAmu.toExponential(1)} u</b></span>
+                  <input
+                    type="range"
+                    min="3"
+                    max="9"
+                    step="0.1"
+                    value={Math.log10(brownianMassAmu)}
+                    onChange={(event) => setBrownianMassAmu(10 ** Number(event.target.value))}
+                    onDoubleClick={() => setBrownianMassAmu(1e6)}
+                    title="Logarithmic mass scale · double-click to reset"
+                  />
+                  <small>10³ u · logarithmic · 10⁹ u</small>
+                </label>
+                <button
+                  type="button"
+                  className={`brownian-focus-button ${brownianFocus ? 'active' : ''}`}
+                  aria-pressed={brownianFocus}
+                  onClick={() => setBrownianFocus((value) => !value)}
+                >
+                  <b>DIM GAS {brownianFocus ? 'ON' : 'OFF'}</b>
+                  <small>{brownianFocus ? 'tracer emphasized' : 'normal gas opacity'}</small>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -633,11 +726,6 @@ function App() {
           </div>
           <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
           <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
-          <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
-            <span>DIFFUSE REFLECTION PROBABILITY <b>{diffuseReflectionPercent}%</b></span>
-            <input type="range" min="0" max="100" step="1" disabled={!thermostatEnabled} value={diffuseReflectionPercent} onChange={(event) => setDiffuseReflectionPercent(Number(event.target.value))} onDoubleClick={() => setDiffuseReflectionPercent(100)} title="0% specular · 100% complete thermal resampling · double-click to reset" />
-            <small>0% SPECULAR · 100% COMPLETE RESAMPLING</small>
-          </label>
           <button
             type="button"
             className={`thermal-bath-master ${thermostatEnabled ? 'active' : ''}`}
@@ -665,6 +753,11 @@ function App() {
               </button>
             ))}
           </div>
+          <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
+            <span>DIFFUSE REFLECTION PROBABILITY <b>{diffuseReflectionPercent}%</b></span>
+            <input type="range" min="0" max="100" step="1" disabled={!thermostatEnabled} value={diffuseReflectionPercent} onChange={(event) => setDiffuseReflectionPercent(Number(event.target.value))} onDoubleClick={() => setDiffuseReflectionPercent(100)} title="0% specular · 100% complete thermal resampling · double-click to reset" />
+            <small>0% SPECULAR · 100% COMPLETE RESAMPLING</small>
+          </label>
           {thermostatEnabled && thermalBathMode !== 'all' && (
             <div className="thermal-face-config">
               <span>THERMAL FACE 1</span>
@@ -812,7 +905,7 @@ function App() {
                   aria-label="Particle marker diameter"
                   type="range"
                   min="0.1"
-                  max="20"
+                  max="50"
                   step="0.1"
                   value={particleMarkerDiameterAngstrom}
                   onChange={(event) => applyParticleMarkerDiameter(Number(event.target.value))}
@@ -822,7 +915,7 @@ function App() {
                   }}
                   title="Double-click to match collision diameter"
                 />
-                <span className="slider-endpoints"><i>0.1 Å</i><i>20 Å</i></span>
+                <span className="slider-endpoints"><i>0.1 Å</i><i>50 Å</i></span>
               </div>
               <button
                 type="button"

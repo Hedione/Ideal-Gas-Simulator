@@ -48,8 +48,23 @@ const momentumFragmentShader = `
   }
 `
 
+function niceMomentumReference(target: number): number {
+  const exponent = Math.floor(Math.log10(Math.max(target, 1e-40)))
+  const magnitude = 10 ** exponent
+  const candidates = [1, 2, 5, 10].map((factor) => factor * magnitude)
+  return candidates.reduce((best, candidate) => (
+    Math.abs(Math.log(candidate / target)) < Math.abs(Math.log(best / target)) ? candidate : best
+  ))
+}
+
+function formatMomentumReference(value: number): string {
+  return `${value.toExponential(1)} kg·m/s`
+}
+
 export function MomentumSpaceView(props: MomentumSpaceViewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const momentumReferenceLabelRef = useRef<HTMLSpanElement>(null)
+  const momentumReferenceBarRef = useRef<HTMLElement>(null)
   const settingsRef = useRef(props)
   settingsRef.current = props
 
@@ -201,11 +216,24 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     updateCoordinates()
     let animationFrame = 0
     let frame = 0
+    const centerInCameraSpace = new THREE.Vector3()
     const animate = () => {
       animationFrame = requestAnimationFrame(animate)
       if (frame % 4 === 0) updateCoordinates()
       frame += 1
       controls.update()
+      camera.updateMatrixWorld()
+      centerInCameraSpace.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
+      const depth = Math.max(0.001, -centerInCameraSpace.z)
+      const pixelsPerWorldUnit = host.clientHeight / (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)))
+      const simulation = settingsRef.current.simulation
+      const mass = simulation.massAmu * ATOMIC_MASS_UNIT
+      const momentumPerWorldUnit = 5 * Math.sqrt(mass * BOLTZMANN * simulation.targetTemperature)
+      const targetMomentum = 72 * momentumPerWorldUnit / Math.max(pixelsPerWorldUnit, 1e-6)
+      const referenceMomentum = niceMomentumReference(targetMomentum)
+      const referencePixels = referenceMomentum / momentumPerWorldUnit * pixelsPerWorldUnit
+      if (momentumReferenceBarRef.current) momentumReferenceBarRef.current.style.width = `${referencePixels.toFixed(2)}px`
+      if (momentumReferenceLabelRef.current) momentumReferenceLabelRef.current.textContent = formatMomentumReference(referenceMomentum)
       renderer.render(scene, camera)
     }
     animationFrame = requestAnimationFrame(animate)
@@ -226,9 +254,6 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     }
   }, [props.simulation])
 
-  const mass = props.simulation.massAmu * ATOMIC_MASS_UNIT
-  const momentumLimit = 5 * Math.sqrt(mass * BOLTZMANN * props.simulation.targetTemperature)
-
   return (
     <div className="momentum-space-shell">
       <div ref={hostRef} className="momentum-space-canvas" aria-label="Interactive three-dimensional particle momentum-space distribution" />
@@ -237,8 +262,10 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
         <span className="axis-y">p<sub>y</sub></span>
         <span className="axis-z">p<sub>z</sub></span>
       </div>
-      <div className="momentum-scale">CUBE BOUNDARY ±{momentumLimit.toExponential(2)} kg·m/s PER AXIS</div>
-      <div className="momentum-performance">ALL {props.simulation.count.toLocaleString()} PARTICLES · 15 Hz DATA REFRESH</div>
+      <div className="momentum-reference" aria-label="Live momentum scale reference">
+        <span ref={momentumReferenceLabelRef}>—</span>
+        <i ref={momentumReferenceBarRef} />
+      </div>
     </div>
   )
 }

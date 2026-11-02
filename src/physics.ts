@@ -275,6 +275,12 @@ export class GasSimulation {
   targetTemperature: number
   boxLengthMeters: number
   elapsedTime = 0
+  brownianEnabled = false
+  brownianPosition = new Float64Array([0.5, 0.5, 0.5])
+  brownianVelocity = new Float64Array(3)
+  brownianDiameterMeters = 100e-10
+  brownianMassAmu = 1e6
+  brownianCollisionCount = 0
   readonly collisionDiagnostics: CollisionDiagnostics = {
     enabled: false,
     gridDimension: 0,
@@ -411,6 +417,7 @@ export class GasSimulation {
     this.collisionDiagnostics.meanCollisionTime = Number.POSITIVE_INFINITY
     this.collisionDiagnostics.knudsenNumber = Number.POSITIVE_INFINITY
     this.collisionDiagnostics.accuracyLimited = false
+    if (this.brownianEnabled) this.clearParticlesFromBrownianObject()
   }
 
   resampleVelocities(temperature = this.targetTemperature): void {
@@ -439,10 +446,18 @@ export class GasSimulation {
     this.collisionDiagnostics.meanFreePath = Number.POSITIVE_INFINITY
     this.collisionDiagnostics.meanCollisionTime = Number.POSITIVE_INFINITY
     this.collisionDiagnostics.knudsenNumber = Number.POSITIVE_INFINITY
+    if (this.brownianEnabled) {
+      this.confineBrownianObject()
+      this.clearParticlesFromBrownianObject()
+    }
   }
 
-  setUniformMeanSpeed(): void {
-    const meanSpeed = theoreticalMeanSpeed(this.targetTemperature, this.massAmu)
+  setUniformRmsSpeed(): void {
+    let squaredSpeedSum = 0
+    for (let particle = 0; particle < this.count; particle += 1) {
+      squaredSpeedSum += this.speeds[particle] ** 2
+    }
+    const rmsSpeed = Math.sqrt(squaredSpeedSum / Math.max(1, this.count))
     for (let particle = 0; particle < this.count; particle += 1) {
       const index = particle * 3
       const currentSpeed = Math.hypot(
@@ -451,7 +466,7 @@ export class GasSimulation {
         this.velocities[index + 2],
       )
       if (currentSpeed > 0) {
-        const scale = meanSpeed / currentSpeed
+        const scale = rmsSpeed / currentSpeed
         this.velocities[index] *= scale
         this.velocities[index + 1] *= scale
         this.velocities[index + 2] *= scale
@@ -459,13 +474,28 @@ export class GasSimulation {
         const cosine = 1 - 2 * this.random()
         const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine))
         const azimuth = 2 * Math.PI * this.random()
-        this.velocities[index] = meanSpeed * sine * Math.cos(azimuth)
-        this.velocities[index + 1] = meanSpeed * sine * Math.sin(azimuth)
-        this.velocities[index + 2] = meanSpeed * cosine
+        this.velocities[index] = rmsSpeed * sine * Math.cos(azimuth)
+        this.velocities[index + 1] = rmsSpeed * sine * Math.sin(azimuth)
+        this.velocities[index + 2] = rmsSpeed * cosine
       }
-      this.speeds[particle] = meanSpeed
+      this.speeds[particle] = rmsSpeed
     }
     this.clearExperimentHistory()
+  }
+
+  setBrownianObject(enabled: boolean, diameterMeters = this.brownianDiameterMeters, massAmu = this.brownianMassAmu): void {
+    const wasEnabled = this.brownianEnabled
+    const nextDiameter = Number.isFinite(diameterMeters) && diameterMeters > 0 ? diameterMeters : this.brownianDiameterMeters
+    const diameterChanged = Math.abs(nextDiameter - this.brownianDiameterMeters) > 1e-18
+    this.brownianEnabled = enabled
+    this.brownianDiameterMeters = nextDiameter
+    this.brownianMassAmu = Number.isFinite(massAmu) && massAmu > 0 ? massAmu : this.brownianMassAmu
+    if (enabled && !wasEnabled) {
+      this.resetBrownianObject()
+    } else if (enabled && diameterChanged) {
+      this.confineBrownianObject()
+      this.clearParticlesFromBrownianObject()
+    }
   }
 
   alignVelocitiesToAxis(axis: 0 | 1 | 2): void {
@@ -497,12 +527,14 @@ export class GasSimulation {
     this.wallCollisionCounts.fill(0)
     this.thermalAccommodationCounts.fill(0)
     this.particleCollisionCounts.fill(0)
+    this.brownianCollisionCount = 0
   }
 
   reset(temperature = this.targetTemperature): void {
     this.clearExperimentHistory()
     this.randomizePositions()
     this.resampleVelocities(temperature)
+    if (this.brownianEnabled) this.resetBrownianObject()
   }
 
   advance(
@@ -530,8 +562,15 @@ export class GasSimulation {
     if (!dsmcEnabled || !Number.isFinite(collisionDiameterMeters) || collisionDiameterMeters <= 0) {
       const speedBound = Math.max(1, characteristicMaxSpeed(configuredWallTemperature, this.massAmu))
       const maximumBathStep = (0.2 * this.boxLengthMeters) / speedBound
-      const requiredBathSubsteps = diffuseProbability > 0 ? Math.max(1, Math.ceil(dt / maximumBathStep)) : 1
+      const maximumBrownianStep = this.brownianEnabled
+        ? (0.25 * Math.min(this.brownianDiameterMeters, 0.9 * this.boxLengthMeters)) / speedBound
+        : Number.POSITIVE_INFINITY
+      const maximumParticleStep = Math.min(maximumBathStep, maximumBrownianStep)
+      const requiredBathSubsteps = diffuseProbability > 0 || this.brownianEnabled
+        ? Math.max(1, Math.ceil(dt / maximumParticleStep))
+        : 1
       const bathSubsteps = Math.min(64, requiredBathSubsteps)
+      if (requiredBathSubsteps > bathSubsteps) this.collisionDiagnostics.accuracyLimited = true
       const bathStep = dt / bathSubsteps
       for (let step = 0; step < bathSubsteps; step += 1) {
         this.advanceParticles(bathStep, diffuseProbability, thermalWalls)
@@ -546,7 +585,10 @@ export class GasSimulation {
 
     const cellWidth = this.boxLengthMeters / gridDimension
     const speedBound = Math.max(1, characteristicMaxSpeed(configuredWallTemperature, this.massAmu))
-    const maximumStep = (0.5 * cellWidth) / speedBound
+    const maximumBrownianStep = this.brownianEnabled
+      ? (0.25 * Math.min(this.brownianDiameterMeters, 0.9 * this.boxLengthMeters)) / speedBound
+      : Number.POSITIVE_INFINITY
+    const maximumStep = Math.min((0.5 * cellWidth) / speedBound, maximumBrownianStep)
     const requiredSubsteps = Math.max(1, Math.ceil(dt / maximumStep))
     const substeps = Math.min(64, requiredSubsteps)
     const substepDt = dt / substeps
@@ -569,6 +611,7 @@ export class GasSimulation {
   }
 
   private advanceParticles(dt: number, diffuseReflectionProbability: number, thermalWalls: ThermalWallSelection): void {
+    this.advanceBrownianObject(dt)
     for (let particle = 0; particle < this.count; particle += 1) {
       const index = particle * 3
       let eligibleContacts = 0
@@ -631,11 +674,114 @@ export class GasSimulation {
           this.thermalAccommodationCounts[particle] += 1
         }
       }
+      if (this.brownianEnabled) this.resolveBrownianCollision(particle)
       const vx = this.velocities[index]
       const vy = this.velocities[index + 1]
       const vz = this.velocities[index + 2]
       this.speeds[particle] = Math.hypot(vx, vy, vz)
     }
+  }
+
+  private brownianRadiusNormalized(): number {
+    return Math.max(1e-6, Math.min(0.45, 0.5 * this.brownianDiameterMeters / this.boxLengthMeters))
+  }
+
+  private confineBrownianObject(): void {
+    const radius = this.brownianRadiusNormalized()
+    for (let axis = 0; axis < 3; axis += 1) {
+      this.brownianPosition[axis] = Math.max(radius, Math.min(1 - radius, this.brownianPosition[axis]))
+    }
+  }
+
+  private resetBrownianObject(): void {
+    this.brownianPosition.set([0.5, 0.5, 0.5])
+    const sigma = thermalSigma(this.targetTemperature, this.brownianMassAmu)
+    this.brownianVelocity[0] = gaussian(this.random) * sigma
+    this.brownianVelocity[1] = gaussian(this.random) * sigma
+    this.brownianVelocity[2] = gaussian(this.random) * sigma
+    this.brownianCollisionCount = 0
+    this.confineBrownianObject()
+    this.clearParticlesFromBrownianObject()
+  }
+
+  private clearParticlesFromBrownianObject(): void {
+    if (!this.brownianEnabled) return
+    const radius = this.brownianRadiusNormalized()
+    const radiusSquared = radius * radius
+    for (let particle = 0; particle < this.count; particle += 1) {
+      const index = particle * 3
+      let dx = this.positions[index] - this.brownianPosition[0]
+      let dy = this.positions[index + 1] - this.brownianPosition[1]
+      let dz = this.positions[index + 2] - this.brownianPosition[2]
+      let distanceSquared = dx * dx + dy * dy + dz * dz
+      if (distanceSquared >= radiusSquared) continue
+      if (distanceSquared < 1e-16) {
+        const cosine = 1 - 2 * this.random()
+        const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine))
+        const azimuth = 2 * Math.PI * this.random()
+        dx = sine * Math.cos(azimuth)
+        dy = sine * Math.sin(azimuth)
+        dz = cosine
+        distanceSquared = 1
+      }
+      const scale = (radius + 1e-6) / Math.sqrt(distanceSquared)
+      this.positions[index] = Math.max(0, Math.min(1, this.brownianPosition[0] + dx * scale))
+      this.positions[index + 1] = Math.max(0, Math.min(1, this.brownianPosition[1] + dy * scale))
+      this.positions[index + 2] = Math.max(0, Math.min(1, this.brownianPosition[2] + dz * scale))
+    }
+  }
+
+  private advanceBrownianObject(dt: number): void {
+    if (!this.brownianEnabled) return
+    const radius = this.brownianRadiusNormalized()
+    const span = 1 - 2 * radius
+    for (let axis = 0; axis < 3; axis += 1) {
+      const start = (this.brownianPosition[axis] - radius) / span
+      const end = start + (this.brownianVelocity[axis] * dt) / (this.boxLengthMeters * span)
+      const [position, velocity] = foldCoordinate(end, this.brownianVelocity[axis])
+      this.brownianPosition[axis] = radius + position * span
+      this.brownianVelocity[axis] = velocity
+    }
+  }
+
+  private resolveBrownianCollision(particle: number): void {
+    const index = particle * 3
+    const radius = this.brownianRadiusNormalized()
+    let dx = this.positions[index] - this.brownianPosition[0]
+    let dy = this.positions[index + 1] - this.brownianPosition[1]
+    let dz = this.positions[index + 2] - this.brownianPosition[2]
+    let distance = Math.hypot(dx, dy, dz)
+    if (distance >= radius) return
+    if (distance < 1e-12) {
+      dx = 1
+      dy = 0
+      dz = 0
+      distance = 1
+    }
+    const nx = dx / distance
+    const ny = dy / distance
+    const nz = dz / distance
+    this.positions[index] = Math.max(0, Math.min(1, this.brownianPosition[0] + nx * (radius + 1e-6)))
+    this.positions[index + 1] = Math.max(0, Math.min(1, this.brownianPosition[1] + ny * (radius + 1e-6)))
+    this.positions[index + 2] = Math.max(0, Math.min(1, this.brownianPosition[2] + nz * (radius + 1e-6)))
+
+    const relativeNormalVelocity =
+      (this.velocities[index] - this.brownianVelocity[0]) * nx +
+      (this.velocities[index + 1] - this.brownianVelocity[1]) * ny +
+      (this.velocities[index + 2] - this.brownianVelocity[2]) * nz
+    if (relativeNormalVelocity >= 0) return
+
+    const particleMass = this.massAmu * ATOMIC_MASS_UNIT
+    const brownianMass = this.brownianMassAmu * ATOMIC_MASS_UNIT
+    const impulse = -2 * relativeNormalVelocity / (1 / particleMass + 1 / brownianMass)
+    this.velocities[index] += (impulse / particleMass) * nx
+    this.velocities[index + 1] += (impulse / particleMass) * ny
+    this.velocities[index + 2] += (impulse / particleMass) * nz
+    this.brownianVelocity[0] -= (impulse / brownianMass) * nx
+    this.brownianVelocity[1] -= (impulse / brownianMass) * ny
+    this.brownianVelocity[2] -= (impulse / brownianMass) * nz
+    this.particleCollisionCounts[particle] += 1
+    this.brownianCollisionCount += 1
   }
 
   private ensureCollisionBuffers(gridDimension: number): void {

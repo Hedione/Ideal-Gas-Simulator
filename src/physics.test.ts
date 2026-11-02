@@ -175,16 +175,17 @@ describe('distribution calculations', () => {
 })
 
 describe('nonequilibrium controls', () => {
-  it('sets every particle to the theoretical mean speed without changing directions', () => {
+  it('sets every particle to the ensemble RMS speed without changing directions or total energy', () => {
     const simulation = new GasSimulation(2_000, 450, 39.948, seededRandom(301))
     const firstDirection = Array.from(simulation.velocities.slice(0, 3))
     const firstMagnitude = Math.hypot(...firstDirection)
+    const energyBefore = simulation.statistics().totalKineticEnergy
+    const expected = simulation.statistics().rmsSpeed
     simulation.elapsedTime = 3e-9
     simulation.wallCollisionCounts.fill(4)
 
-    simulation.setUniformMeanSpeed()
+    simulation.setUniformRmsSpeed()
 
-    const expected = theoreticalMeanSpeed(450, 39.948)
     for (const speed of simulation.speeds) expect(speed / expected).toBeCloseTo(1, 6)
     const newMagnitude = Math.hypot(
       simulation.velocities[0],
@@ -194,8 +195,33 @@ describe('nonequilibrium controls', () => {
     for (let axis = 0; axis < 3; axis += 1) {
       expect(simulation.velocities[axis] / newMagnitude).toBeCloseTo(firstDirection[axis] / firstMagnitude, 6)
     }
+    expect(simulation.statistics().totalKineticEnergy / energyBefore).toBeCloseTo(1, 6)
     expect(simulation.elapsedTime).toBe(0)
     expect(simulation.wallCollisionCounts.every((count) => count === 0)).toBe(true)
+  })
+
+  it('conserves pair momentum and kinetic energy in a gas–Brownian tracer collision', () => {
+    const simulation = new GasSimulation(1, 300, 39.948, seededRandom(303), 1e-6)
+    simulation.setBrownianObject(true, 0.2e-6, 39.948)
+    simulation.brownianPosition.set([0.5, 0.5, 0.5])
+    simulation.brownianVelocity.fill(0)
+    simulation.positions.set([0.39, 0.5, 0.5])
+    simulation.velocities.set([100, 0, 0])
+    simulation.speeds[0] = 100
+    const particleMass = simulation.massAmu * ATOMIC_MASS_UNIT
+    const momentumBefore = particleMass * 100
+    const energyBefore = 0.5 * particleMass * 100 ** 2
+
+    simulation.advance(2e-10)
+
+    const momentumAfter = particleMass * (simulation.velocities[0] + simulation.brownianVelocity[0])
+    const energyAfter = 0.5 * particleMass * (
+      simulation.velocities[0] ** 2 + simulation.velocities[1] ** 2 + simulation.velocities[2] ** 2 +
+      simulation.brownianVelocity[0] ** 2 + simulation.brownianVelocity[1] ** 2 + simulation.brownianVelocity[2] ** 2
+    )
+    expect(momentumAfter / momentumBefore).toBeCloseTo(1, 6)
+    expect(energyAfter / energyBefore).toBeCloseTo(1, 6)
+    expect(simulation.brownianCollisionCount).toBe(1)
   })
 
   it('aligns velocities to one axis while preserving every particle speed and total energy', () => {
