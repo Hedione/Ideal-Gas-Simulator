@@ -5,7 +5,9 @@ import {
   buildHistogram,
   characteristicMaxSpeed,
   GasSimulation,
+  maxwellBoltzmannCdf,
   maxwellBoltzmannDensity,
+  maxwellBoltzmannQuantile,
   mostProbableSpeed,
   scatterEqualMassVelocities,
   theoreticalMeanSpeed,
@@ -159,6 +161,16 @@ describe('distribution calculations', () => {
     expect(mostProbableSpeed(1000, 40) / base).toBeCloseTo(2, 12)
     expect(mostProbableSpeed(250, 160) / base).toBeCloseTo(0.5, 12)
     expect(theoreticalRmsSpeed(500, 20) / theoreticalRmsSpeed(500, 80)).toBeCloseTo(2, 12)
+  })
+
+  it('inverts the Maxwell–Boltzmann speed distribution for percentile cutoffs', () => {
+    const coldCutoff = maxwellBoltzmannQuantile(0.01, 300, 39.948)
+    const hotCutoff = maxwellBoltzmannQuantile(0.99, 300, 39.948)
+    expect(coldCutoff).toBeGreaterThan(0)
+    expect(hotCutoff).toBeGreaterThan(coldCutoff)
+    expect(maxwellBoltzmannCdf(coldCutoff, 300, 39.948)).toBeCloseTo(0.01, 8)
+    expect(maxwellBoltzmannCdf(hotCutoff, 300, 39.948)).toBeCloseTo(0.99, 8)
+    expect(maxwellBoltzmannQuantile(0.99, 1200, 39.948) / hotCutoff).toBeCloseTo(2, 10)
   })
 })
 

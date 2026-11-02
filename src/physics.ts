@@ -133,6 +133,47 @@ export function maxwellBoltzmannDensity(
     Math.exp((-mass * speed * speed) / (2 * BOLTZMANN * temperature))
 }
 
+function errorFunction(value: number): number {
+  const sign = value < 0 ? -1 : 1
+  const x = Math.abs(value)
+  const t = 1 / (1 + 0.3275911 * x)
+  const polynomial = (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t
+  return sign * (1 - polynomial * Math.exp(-x * x))
+}
+
+export function maxwellBoltzmannCdf(
+  speed: number,
+  temperature: number,
+  massAmu: number,
+): number {
+  if (speed <= 0) return 0
+  if (temperature <= 0 || massAmu <= 0) return Number.NaN
+  const scaledSpeed = speed / thermalSigma(temperature, massAmu)
+  const probability = errorFunction(scaledSpeed / Math.SQRT2) -
+    Math.sqrt(2 / Math.PI) * scaledSpeed * Math.exp(-0.5 * scaledSpeed * scaledSpeed)
+  return Math.max(0, Math.min(1, probability))
+}
+
+export function maxwellBoltzmannQuantile(
+  probability: number,
+  temperature: number,
+  massAmu: number,
+): number {
+  if (probability <= 0) return 0
+  if (probability >= 1) return Number.POSITIVE_INFINITY
+  if (temperature <= 0 || massAmu <= 0) return Number.NaN
+  const sigma = thermalSigma(temperature, massAmu)
+  let lower = 0
+  let upper = 5 * sigma
+  while (maxwellBoltzmannCdf(upper, temperature, massAmu) < probability) upper *= 2
+  for (let iteration = 0; iteration < 60; iteration += 1) {
+    const midpoint = 0.5 * (lower + upper)
+    if (maxwellBoltzmannCdf(midpoint, temperature, massAmu) < probability) lower = midpoint
+    else upper = midpoint
+  }
+  return 0.5 * (lower + upper)
+}
+
 export function characteristicMaxSpeed(temperature: number, massAmu: number): number {
   // Five component standard deviations contains >99.998% of this speed law.
   return 5 * thermalSigma(temperature, massAmu)

@@ -8,6 +8,7 @@ import {
   GAS_SPECIES,
   GasName,
   GasSimulation,
+  maxwellBoltzmannQuantile,
   mostProbableSpeed,
   SimulationStats,
   theoreticalMeanSpeed,
@@ -47,10 +48,12 @@ function App() {
   const [particleMarkerSize, setParticleMarkerSize] = useState(1)
   const [bins, setBins] = useState(100)
   const [highlightFast, setHighlightFast] = useState(false)
-  const [speedThreshold, setSpeedThreshold] = useState(500)
+  const [speedThreshold, setSpeedThreshold] = useState(750)
+  const [speedThresholdDraft, setSpeedThresholdDraft] = useState('750')
   const [highlightedCount, setHighlightedCount] = useState(0)
   const [highlightCold, setHighlightCold] = useState(false)
   const [coldSpeedThreshold, setColdSpeedThreshold] = useState(100)
+  const [coldSpeedThresholdDraft, setColdSpeedThresholdDraft] = useState('100')
   const [coldHighlightedCount, setColdHighlightedCount] = useState(0)
   const [highlightBand, setHighlightBand] = useState(false)
   const [bandCenter, setBandCenter] = useState(400)
@@ -125,6 +128,44 @@ function App() {
     }
     applyTemperature(parsed)
   }, [applyTemperature, temperature, temperatureDraft])
+
+  const applyHotThreshold = useCallback((next: number) => {
+    if (!Number.isFinite(next) || next <= 0) return
+    setSpeedThreshold(next)
+    setSpeedThresholdDraft(String(next))
+  }, [])
+
+  const applyColdThreshold = useCallback((next: number) => {
+    if (!Number.isFinite(next) || next <= 0) return
+    setColdSpeedThreshold(next)
+    setColdSpeedThresholdDraft(String(next))
+  }, [])
+
+  const commitHotThresholdDraft = useCallback(() => {
+    const parsed = Number(speedThresholdDraft)
+    if (speedThresholdDraft.trim() === '' || !Number.isFinite(parsed) || parsed <= 0) {
+      setSpeedThresholdDraft(String(speedThreshold))
+      return
+    }
+    applyHotThreshold(parsed)
+  }, [applyHotThreshold, speedThreshold, speedThresholdDraft])
+
+  const commitColdThresholdDraft = useCallback(() => {
+    const parsed = Number(coldSpeedThresholdDraft)
+    if (coldSpeedThresholdDraft.trim() === '' || !Number.isFinite(parsed) || parsed <= 0) {
+      setColdSpeedThresholdDraft(String(coldSpeedThreshold))
+      return
+    }
+    applyColdThreshold(parsed)
+  }, [applyColdThreshold, coldSpeedThreshold, coldSpeedThresholdDraft])
+
+  const selectHotTopPercent = () => {
+    applyHotThreshold(Math.round(maxwellBoltzmannQuantile(0.99, temperature, massAmu)))
+  }
+
+  const selectColdBottomPercent = () => {
+    applyColdThreshold(Math.max(1, Math.round(maxwellBoltzmannQuantile(0.01, temperature, massAmu))))
+  }
 
   const applyBoxLength = useCallback((nextMicrometers: number) => {
     const micrometers = Math.max(0.1, Math.min(1, Number.isFinite(nextMicrometers) ? nextMicrometers : 1))
@@ -514,38 +555,88 @@ function App() {
               PICK ANOTHER RANDOM PARTICLE
             </button>
           )}
-          <label className={`threshold-control ${highlightFast ? '' : 'disabled'}`}>
-            <span>HOT CUTOFF <b>{speedThreshold.toLocaleString()} m/s</b></span>
-            <input
-              className="threshold-slider hot-slider"
-              type="range"
-              min="0"
-              max="5000"
-              step="10"
-              disabled={!highlightFast}
-              value={speedThreshold}
-              onChange={(event) => setSpeedThreshold(Number(event.target.value))}
-              onDoubleClick={() => setSpeedThreshold(500)}
-              title="Double-click to reset"
-            />
+          <div className={`threshold-control ${highlightFast ? '' : 'disabled'}`}>
+            <div className="threshold-title-row">
+              <span>HOT CUTOFF</span>
+              <div className="cutoff-number-input">
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="any"
+                  disabled={!highlightFast}
+                  value={speedThresholdDraft}
+                  onChange={(event) => setSpeedThresholdDraft(event.target.value)}
+                  onBlur={commitHotThresholdDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      setSpeedThresholdDraft(String(speedThreshold))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                  aria-label="Hot particle speed cutoff"
+                />
+                <span>m/s</span>
+              </div>
+            </div>
+            <div className="threshold-slider-row">
+              <input
+                className="threshold-slider hot-slider"
+                type="range"
+                min="0"
+                max="5000"
+                step="10"
+                disabled={!highlightFast}
+                value={Math.min(5000, speedThreshold)}
+                onChange={(event) => applyHotThreshold(Math.max(1, Number(event.target.value)))}
+                onDoubleClick={() => applyHotThreshold(750)}
+                title="Double-click to reset"
+              />
+              <button type="button" className="quantile-button hot" disabled={!highlightFast} onClick={selectHotTopPercent}>TOP 1%</button>
+            </div>
             <small>{highlightedCount.toLocaleString()} particles above cutoff</small>
-          </label>
-          <label className={`threshold-control ${highlightCold ? '' : 'disabled'}`}>
-            <span>COLD CUTOFF <b>{coldSpeedThreshold.toLocaleString()} m/s</b></span>
-            <input
-              className="threshold-slider cold-slider"
-              type="range"
-              min="0"
-              max="500"
-              step="1"
-              disabled={!highlightCold}
-              value={coldSpeedThreshold}
-              onChange={(event) => setColdSpeedThreshold(Number(event.target.value))}
-              onDoubleClick={() => setColdSpeedThreshold(100)}
-              title="Double-click to reset"
-            />
+          </div>
+          <div className={`threshold-control ${highlightCold ? '' : 'disabled'}`}>
+            <div className="threshold-title-row">
+              <span>COLD CUTOFF</span>
+              <div className="cutoff-number-input">
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="any"
+                  disabled={!highlightCold}
+                  value={coldSpeedThresholdDraft}
+                  onChange={(event) => setColdSpeedThresholdDraft(event.target.value)}
+                  onBlur={commitColdThresholdDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      setColdSpeedThresholdDraft(String(coldSpeedThreshold))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                  aria-label="Cold particle speed cutoff"
+                />
+                <span>m/s</span>
+              </div>
+            </div>
+            <div className="threshold-slider-row">
+              <input
+                className="threshold-slider cold-slider"
+                type="range"
+                min="0"
+                max="500"
+                step="1"
+                disabled={!highlightCold}
+                value={Math.min(500, coldSpeedThreshold)}
+                onChange={(event) => applyColdThreshold(Math.max(1, Number(event.target.value)))}
+                onDoubleClick={() => applyColdThreshold(100)}
+                title="Double-click to reset"
+              />
+              <button type="button" className="quantile-button cold" disabled={!highlightCold} onClick={selectColdBottomPercent}>BOTTOM 1%</button>
+            </div>
             <small>{coldHighlightedCount.toLocaleString()} particles below cutoff</small>
-          </label>
+          </div>
           <div className="band-controls">
             <label className={`threshold-control ${highlightBand ? '' : 'disabled'}`}>
               <span>BAND CENTER <b>{bandCenter.toLocaleString()} m/s</b></span>

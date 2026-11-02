@@ -36,7 +36,7 @@ const vertexShader = `
     vHighlight = particleHighlight;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     float emphasis = mix(0.72, 1.65, vHighlight);
-    gl_PointSize = clamp(pointScale * emphasis * (3.2 / -mvPosition.z), 0.75, 5.0);
+    gl_PointSize = clamp(pointScale * emphasis * (3.2 / -mvPosition.z), 0.75, 40.0);
     gl_Position = projectionMatrix * mvPosition;
   }
 `

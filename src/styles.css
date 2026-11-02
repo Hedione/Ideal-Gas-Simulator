@@ -206,6 +206,18 @@ select { width: 100%; height: 35px; color: #dce9ed; border: 1px solid #29404a; b
 .threshold-control { display: block; margin-top: 12px; transition: opacity .2s; }
 .threshold-control > span { display: flex; justify-content: space-between; margin-bottom: 4px; color: #657b85; font: 8px 'DM Mono', monospace; letter-spacing: .08em; }
 .threshold-control > span b { color: #b8c7cd; font-weight: 500; }
+.threshold-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.threshold-title-row > span { color: #657b85; font: 8px 'DM Mono', monospace; letter-spacing: .08em; }
+.cutoff-number-input { display: flex; width: 112px; height: 27px; overflow: hidden; border: 1px solid #29404a; border-radius: 3px; background: #0a151b; }
+.cutoff-number-input input { min-width: 0; width: 72px; padding: 0 6px; border: 0; outline: 0; color: #c5d7dd; background: transparent; font: 8px 'DM Mono', monospace; }
+.cutoff-number-input span { flex: 1; padding: 8px 5px; border-left: 1px solid #29404a; color: #627984; font: 7px 'DM Mono', monospace; white-space: nowrap; }
+.threshold-slider-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.threshold-slider-row .threshold-slider { margin: 0; }
+.quantile-button { min-width: 64px; height: 28px; padding: 0 7px; border: 1px solid #30454e; border-radius: 3px; background: #0d1b22; color: #80949d; cursor: pointer; font: 7px 'DM Mono', monospace; letter-spacing: .04em; }
+.quantile-button.hot:not(:disabled) { color: #ffad69; border-color: rgba(255, 133, 31, .4); }
+.quantile-button.cold:not(:disabled) { color: #7bd4ff; border-color: rgba(30, 183, 255, .4); }
+.quantile-button:hover:not(:disabled) { background: #142830; }
+.quantile-button:disabled { cursor: not-allowed; }
 .threshold-slider { width: 100%; height: 3px; margin: 5px 0 0; }
 .threshold-slider.hot-slider { accent-color: #ff851f; }
 .threshold-slider.cold-slider { accent-color: #1eb7ff; }
