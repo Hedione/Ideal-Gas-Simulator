@@ -62,7 +62,7 @@ function App() {
   const [unfocusedOpacity, setUnfocusedOpacity] = useState(0.18)
   const [trackParticle, setTrackParticle] = useState(false)
   const [trackedParticleIndex, setTrackedParticleIndex] = useState(0)
-  const [showMomentumSpace, setShowMomentumSpace] = useState(false)
+  const [showMomentumSpace, setShowMomentumSpace] = useState(true)
   const [showInfo, setShowInfo] = useState(false)
   const [stats, setStats] = useState<SimulationStats>(() => simulation.statistics())
 
@@ -300,7 +300,8 @@ function App() {
               <h2>3D momentum cloud</h2>
             </div>
             <button onClick={() => setShowMomentumSpace((value) => !value)} aria-pressed={showMomentumSpace}>
-              {showMomentumSpace ? 'VIEW ON' : 'VIEW OFF'}
+              <b>MOMENTUM SPACE</b>
+              <span>{showMomentumSpace ? 'VIEW ON' : 'VIEW OFF'}</span>
             </button>
           </div>
           {showMomentumSpace ? (

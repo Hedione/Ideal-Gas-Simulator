@@ -102,8 +102,11 @@ button { color: inherit; }
 .accent-gold { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 
 .momentum-panel { border-right: 1px solid var(--line); overflow: hidden; display: flex; flex-direction: column; background: linear-gradient(145deg, rgba(7, 18, 24, .98), rgba(5, 11, 16, .98)); }
-.momentum-panel-heading { flex: 0 0 64px; border-bottom: 1px solid rgba(143, 184, 198, .08); }
-.momentum-panel-heading button { padding: 6px 8px; border: 1px solid rgba(53, 211, 228, .25); border-radius: 3px; background: rgba(20, 76, 84, .12); color: #6f8993; cursor: pointer; font: 7px 'DM Mono', monospace; letter-spacing: .07em; }
+.momentum-panel-heading { flex: 0 0 76px; border-bottom: 1px solid rgba(143, 184, 198, .08); }
+.momentum-panel-heading button { min-width: 132px; min-height: 50px; padding: 9px 13px; border: 1px solid rgba(53, 211, 228, .25); border-radius: 4px; background: rgba(20, 76, 84, .12); color: #6f8993; cursor: pointer; text-align: left; }
+.momentum-panel-heading button b, .momentum-panel-heading button span { display: block; font-family: 'DM Mono', monospace; }
+.momentum-panel-heading button b { font-size: 8px; font-weight: 500; letter-spacing: .07em; }
+.momentum-panel-heading button span { margin-top: 6px; font-size: 6px; letter-spacing: .05em; }
 .momentum-panel.active .momentum-panel-heading button { color: #9eeaf0; border-color: rgba(53, 211, 228, .5); background: rgba(32, 129, 142, .18); }
 .momentum-disabled { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 22px; color: #526a74; text-align: center; }
 .momentum-disabled i { width: 58px; height: 58px; margin-bottom: 17px; border: 1px solid rgba(53, 211, 228, .2); border-radius: 50%; box-shadow: inset 0 0 25px rgba(53, 211, 228, .07); }
