@@ -175,16 +175,15 @@ select { width: 100%; height: 35px; color: #dce9ed; border: 1px solid #29404a; b
 .bins-row > span { margin: 0; }
 .bins-row input { width: 100%; }
 .bins-row b { font: 10px 'DM Mono', monospace; color: #a7bac2; text-align: right; }
-.toggle-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 17px; row-gap: 9px; }
-.toggle-row { position: relative; display: flex; align-items: center; justify-content: space-between; color: #899ca5; font-size: 9px; cursor: pointer; }
-.toggle-row input { position: absolute; opacity: 0; }
-.toggle-row i { position: relative; width: 25px; height: 13px; background: #18262d; border: 1px solid #30444c; border-radius: 10px; transition: .2s; }
-.toggle-row i::after { content: ''; position: absolute; width: 7px; height: 7px; left: 2px; top: 2px; background: #70858f; border-radius: 50%; transition: .2s; }
-.toggle-row input:checked + i { background: rgba(53, 211, 228, .2); border-color: #2e9eaa; }
-.toggle-row input:checked + i::after { left: 14px; background: var(--cyan); box-shadow: 0 0 5px var(--cyan); }
 .bath-rate { display: block; margin-top: 15px; transition: opacity .2s; }
 .bath-rate.disabled, .threshold-control.disabled { opacity: .35; }
 .simulation-dsmc { margin-top: 19px; padding-top: 15px; border-top: 1px solid rgba(143, 184, 198, .1); }
+.dsmc-mode-button { width: 100%; min-height: 58px; padding: 10px; border: 1px solid #30434b; border-radius: 4px; background: #10191e; color: #65727a; cursor: pointer; text-align: left; transition: color .18s, border-color .18s, background .18s, box-shadow .18s; }
+.dsmc-mode-button b, .dsmc-mode-button span { display: block; font-family: 'DM Mono', monospace; }
+.dsmc-mode-button b { font-size: 9px; font-weight: 500; letter-spacing: .08em; }
+.dsmc-mode-button span { margin-top: 7px; font-size: 6px; letter-spacing: .04em; }
+.dsmc-mode-button.active { color: #9eeaf0; border-color: rgba(53, 211, 228, .55); background: rgba(32, 173, 192, .15); box-shadow: inset 0 -3px var(--cyan), 0 0 14px rgba(53, 211, 228, .08); }
+.dsmc-mode-button:hover { border-color: #52717c; }
 .dsmc-status { margin-top: 13px; padding: 8px 9px; border: 1px solid rgba(53, 211, 228, .2); border-radius: 3px; background: rgba(20, 76, 84, .12); }
 .dsmc-status span, .dsmc-status b, .dsmc-status small { display: block; font-family: 'DM Mono', monospace; }
 .dsmc-status span { color: var(--cyan); font-size: 7px; letter-spacing: .1em; }

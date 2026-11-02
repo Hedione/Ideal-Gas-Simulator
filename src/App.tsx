@@ -29,16 +29,6 @@ function formatLength(meters: number): string {
   return `${(meters * 1e9).toFixed(2)} nm`
 }
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
-  return (
-    <label className="toggle-row">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <i aria-hidden="true" />
-    </label>
-  )
-}
-
 function App() {
   const [temperature, setTemperature] = useState(300)
   const [temperatureDraft, setTemperatureDraft] = useState('300')
@@ -222,12 +212,11 @@ function App() {
       <header className="topbar">
         <div className="brand-mark"><span /><i /><b /></div>
         <div className="brand-copy">
-          <h1>Maxwell–Boltzmann <em>Lab</em></h1>
+          <h1>Hedione&apos;s <em>Ideal Gas Simulator</em></h1>
           <p>CLASSICAL IDEAL GAS · 3D STATISTICAL MECHANICS</p>
         </div>
         <div className="topbar-meta">
           <span><i className="live-dot" /> LIVE MODEL</span>
-          <span>BOX <b>{boxLengthMicrometers.toFixed(2)} μm</b></span>
           <button className="info-button" onClick={() => setShowInfo((value) => !value)} aria-expanded={showInfo}>i</button>
         </div>
       </header>
@@ -386,7 +375,15 @@ function App() {
             <span className="slider-endpoints"><i>0.10 μm</i><i>1.00 μm</i></span>
           </label>
           <div className="simulation-dsmc">
-            <Toggle label="DSMC collisions" checked={dsmcEnabled} onChange={setDsmcEnabled} />
+            <button
+              type="button"
+              className={`dsmc-mode-button ${dsmcEnabled ? 'active' : ''}`}
+              aria-pressed={dsmcEnabled}
+              onClick={() => setDsmcEnabled((value) => !value)}
+            >
+              <b>DSMC COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
+              <span>{dsmcEnabled ? 'hard-sphere binary collisions enabled' : 'collisionless particle motion'}</span>
+            </button>
             {dsmcEnabled && (
               <div className={`dsmc-status ${simulation.collisionDiagnostics.accuracyLimited ? 'warning' : ''}`}>
                 <span>HARD-SPHERE DSMC</span>

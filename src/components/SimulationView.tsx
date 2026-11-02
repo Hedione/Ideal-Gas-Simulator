@@ -234,12 +234,17 @@ export function SimulationView(props: SimulationViewProps) {
         ;(geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
       }
 
-      // User-controlled marker size is independent of collision physics, while
-      // population compensation keeps dense ensembles from filling the view.
+      // Box-length scaling is visual only here: physics remains in normalized
+      // coordinates, while the larger grid makes a shorter physical box read as
+      // smaller. Marker scaling compounds with, but does not alter, the user's
+      // nominal marker-size control.
+      const boxVisualScale = Math.max(1, Math.min(10, 1e-6 / current.simulation.boxLengthMeters))
+      const automaticMarkerScale = Math.sqrt(boxVisualScale)
+      grid.scale.setScalar(boxVisualScale)
       const populationScale = Math.max(0.32, Math.min(2.2, Math.sqrt(10_000 / current.simulation.count)))
-      material.uniforms.pointScale.value = 0.72 * Math.min(window.devicePixelRatio, 1.75) * current.particleMarkerSize * populationScale
+      material.uniforms.pointScale.value = 0.72 * Math.min(window.devicePixelRatio, 1.75) * current.particleMarkerSize * populationScale * automaticMarkerScale
       material.uniforms.unfocusedOpacity.value = current.unfocusedOpacity
-      trackedMarker.scale.setScalar(Math.max(0.5, current.particleMarkerSize))
+      trackedMarker.scale.setScalar(Math.max(0.5, current.particleMarkerSize * automaticMarkerScale))
       thermalFace.visible = current.thermostatEnabled && current.singleFaceBath
 
       if (current.trackParticle && current.simulation.count > 0) {
