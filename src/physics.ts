@@ -507,12 +507,15 @@ export class GasSimulation {
 
   advance(
     dt: number,
-    thermostatRate = 0,
+    diffuseReflectionProbability = 0,
     thermalWalls: ThermalWallSelection = false,
     dsmcEnabled = false,
     collisionDiameterMeters = COLLISION_DIAMETERS_ANGSTROM.Argon * 1e-10,
   ): void {
     if (!Number.isFinite(dt) || dt <= 0) return
+    const diffuseProbability = Number.isFinite(diffuseReflectionProbability)
+      ? Math.max(0, Math.min(1, diffuseReflectionProbability))
+      : 0
 
     this.collisionDiagnostics.enabled = dsmcEnabled
     this.collisionDiagnostics.acceptedLastAdvance = 0
@@ -527,11 +530,11 @@ export class GasSimulation {
     if (!dsmcEnabled || !Number.isFinite(collisionDiameterMeters) || collisionDiameterMeters <= 0) {
       const speedBound = Math.max(1, characteristicMaxSpeed(configuredWallTemperature, this.massAmu))
       const maximumBathStep = (0.2 * this.boxLengthMeters) / speedBound
-      const requiredBathSubsteps = thermostatRate > 0 ? Math.max(1, Math.ceil(dt / maximumBathStep)) : 1
+      const requiredBathSubsteps = diffuseProbability > 0 ? Math.max(1, Math.ceil(dt / maximumBathStep)) : 1
       const bathSubsteps = Math.min(64, requiredBathSubsteps)
       const bathStep = dt / bathSubsteps
       for (let step = 0; step < bathSubsteps; step += 1) {
-        this.advanceParticles(bathStep, thermostatRate, thermalWalls)
+        this.advanceParticles(bathStep, diffuseProbability, thermalWalls)
       }
       this.elapsedTime += dt
       return
@@ -552,7 +555,7 @@ export class GasSimulation {
     let accepted = 0
     let trials = 0
     for (let step = 0; step < substeps; step += 1) {
-      this.advanceParticles(substepDt, thermostatRate, thermalWalls)
+      this.advanceParticles(substepDt, diffuseProbability, thermalWalls)
       const result = this.applyDsmcCollisions(substepDt, collisionDiameterMeters)
       accepted += result.accepted
       trials += result.trials
@@ -565,7 +568,7 @@ export class GasSimulation {
     this.elapsedTime += dt
   }
 
-  private advanceParticles(dt: number, thermostatRate: number, thermalWalls: ThermalWallSelection): void {
+  private advanceParticles(dt: number, diffuseReflectionProbability: number, thermalWalls: ThermalWallSelection): void {
     for (let particle = 0; particle < this.count; particle += 1) {
       const index = particle * 3
       let eligibleContacts = 0
@@ -579,7 +582,7 @@ export class GasSimulation {
           (this.velocities[component] * dt) / this.boxLengthMeters
         const crossings = axisWallCrossings(this.positions[component], proposed)
         if (crossings.total > 0) this.wallCollisionCounts[particle] += crossings.total
-        if (thermostatRate > 0) {
+        if (diffuseReflectionProbability > 0) {
           if (Array.isArray(thermalWalls)) {
             for (const wall of thermalWalls) {
               if (wall.axis !== axis) continue
@@ -617,7 +620,7 @@ export class GasSimulation {
         this.velocities[component] = velocity
       }
       if (thermalAxis >= 0 && eligibleContacts > 0) {
-        const accommodationProbability = 1 - Math.exp(-thermostatRate * 1e-9 * eligibleContacts)
+        const accommodationProbability = 1 - (1 - diffuseReflectionProbability) ** eligibleContacts
         if (this.random() < accommodationProbability) {
           const sigma = thermalSigma(thermalTemperature, this.massAmu)
           this.velocities[index] = gaussian(this.random) * sigma

@@ -192,18 +192,18 @@ The target temperature belongs to an idealized external reservoir. Thermostat ev
 
 With **Thermal bath** on and **All Faces** selected, all six box faces are diffuse thermal reservoirs. Particles retain their velocities during interior free flight. A random thermal perturbation is possible only after a detected wall crossing.
 
-The selected wall-coupling rate becomes a per-contact accommodation probability using a one-nanosecond reference interval:
+The selected diffuse-reflection percentage directly sets the per-contact accommodation probability:
 
 \[
-\alpha=1-\exp(-\nu\times1\ \mathrm{ns}).
+\alpha=\frac{P_{\mathrm{diffuse}}}{100}.
 \]
 
-With probability \(1-\alpha\), contact remains specular and speed is conserved. With probability \(\alpha\), the particle is thermally re-emitted: its inward normal speed follows the flux-weighted wall distribution and its two tangential components are Gaussian samples at the target temperature.
+At 0%, every eligible contact remains specular and speed is conserved. At 100%, every eligible contact is thermally re-emitted: its inward normal speed follows the flux-weighted wall distribution and its two tangential components are Gaussian samples at the target temperature. Intermediate percentages apply the corresponding Bernoulli probability independently at each contact.
 
 When one numerical substep spans more than one wall crossing, the code combines the eligible contacts as
 
 \[
-P_{\mathrm{accommodate}}=1-\exp(-\nu\times1\ \mathrm{ns}\times N_{\mathrm{contacts}}).
+P_{\mathrm{accommodate}}=1-(1-\alpha)^{N_{\mathrm{contacts}}}.
 \]
 
 Bath-enabled motion is internally substepped according to thermal speed and box size to make multiple-contact approximations uncommon during ordinary operation.

@@ -15,6 +15,7 @@ interface MomentumSpaceViewProps {
   unfocusedOpacity: number
   trackParticle: boolean
   trackedParticleIndex: number
+  pointSize: number
 }
 
 const momentumVertexShader = `
@@ -28,7 +29,7 @@ const momentumVertexShader = `
     vHighlight = particleHighlight;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     float emphasis = mix(0.72, 1.65, vHighlight);
-    gl_PointSize = clamp(pointScale * emphasis * (3.2 / -mvPosition.z), 0.75, 5.0);
+    gl_PointSize = clamp(pointScale * emphasis * (3.2 / -mvPosition.z), 0.75, 12.0);
     gl_Position = projectionMatrix * mvPosition;
   }
 `
@@ -82,7 +83,7 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     geometry.setAttribute('particleHighlight', new THREE.BufferAttribute(highlights, 1))
     const material = new THREE.ShaderMaterial({
       uniforms: {
-        pointScale: { value: 1.8 * Math.min(window.devicePixelRatio, 1.5) },
+        pointScale: { value: 1.2 * Math.min(window.devicePixelRatio, 1.5) * props.pointSize },
         unfocusedOpacity: { value: props.unfocusedOpacity },
       },
       vertexShader: momentumVertexShader,
@@ -139,7 +140,7 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
       const sigma = Math.max(1e-12, thermalSigma(simulation.targetTemperature, simulation.massAmu))
       const normalization = 5 * sigma
       const densityScale = Math.max(0.45, Math.min(1.8, Math.sqrt(10_000 / simulation.count)))
-      material.uniforms.pointScale.value = 1.2 * Math.min(window.devicePixelRatio, 1.5) * densityScale
+      material.uniforms.pointScale.value = 1.2 * Math.min(window.devicePixelRatio, 1.5) * densityScale * settingsRef.current.pointSize
       material.uniforms.unfocusedOpacity.value = settingsRef.current.unfocusedOpacity
       const current = settingsRef.current
       const trackedIndex = current.trackParticle

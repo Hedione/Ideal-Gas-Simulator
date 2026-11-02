@@ -15,10 +15,10 @@ The cold-particle focus is purely diagnostic. It highlights particles whose inst
 At each eligible wall contact, the accommodation probability is
 
 \[
-\alpha=1-\exp(-\nu\times1\ \mathrm{ns}),
+\alpha=\frac{P_{\mathrm{diffuse}}}{100},
 \]
 
-where \(\nu\) is the wall-coupling control.
+where \(P_{\mathrm{diffuse}}\) is the diffuse-reflection percentage selected in the interface. At 0%, all contacts are specular; at 100%, every eligible contact is thermally resampled.
 
 With probability \(1-\alpha\), reflection is specular: the normal component reverses, tangential components remain unchanged, and scalar speed is conserved.
 
@@ -151,7 +151,7 @@ Turn the bath off and enable DSMC. Membership can still change after binary part
 
 ## 7. Numerical and physical interpretation
 
-The wall-coupling value has units of inverse nanoseconds in the interface, but it is converted to a per-contact accommodation probability using a one-nanosecond reference. It is therefore best interpreted as a convenient wall-coupling strength, not a volumetric Poisson event rate.
+The diffuse-reflection value is a dimensionless percentage applied directly at each eligible wall contact. It is not a frequency or volumetric Poisson event rate. The realized number of thermal resampling events still depends on how often particles strike enabled walls.
 
 The flux-weighted normal distribution is essential. An ordinary half-Gaussian would over-represent slow outgoing particles because fast particles strike walls more frequently, producing artificial cooling. The current Rayleigh normal distribution preserves Maxwell–Boltzmann equilibrium when gas and wall temperatures match.
 

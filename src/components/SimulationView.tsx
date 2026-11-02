@@ -8,13 +8,14 @@ interface SimulationViewProps {
   playing: boolean
   speedMultiplier: number
   thermostatEnabled: boolean
-  thermostatRate: number
+  diffuseReflectionProbability: number
   thermalBathMode: 'all' | 'one' | 'two'
   thermalWalls: readonly ThermalWallContact[]
   dsmcEnabled: boolean
   collisionDiameterAngstrom: number
   particleMarkerDiameterAngstrom: number
   particleOcclusionEnabled: boolean
+  knudsenNumber: number
   highlightFast: boolean
   speedThreshold: number
   highlightCold: boolean
@@ -118,6 +119,31 @@ function placeThermalFace(target: THREE.Mesh, wall: ThermalWallContact): void {
 
 function thermalFaceLabel(wall: ThermalWallContact): string {
   return `${wall.positive ? '+' : '−'}${['X', 'Y', 'Z'][wall.axis]}`
+}
+
+type FlowRegime = {
+  key: 'continuum' | 'slip' | 'transitional' | 'free-molecular'
+  label: string
+  criterion: string
+}
+
+function getFlowRegime(knudsenNumber: number): FlowRegime {
+  if (knudsenNumber < 0.01) {
+    return { key: 'continuum', label: 'CONTINUUM FLOW', criterion: 'Kn < 0.01' }
+  }
+  if (knudsenNumber < 0.1) {
+    return { key: 'slip', label: 'SLIP FLOW', criterion: '0.01 ≤ Kn < 0.1' }
+  }
+  if (knudsenNumber < 10) {
+    return { key: 'transitional', label: 'TRANSITIONAL FLOW', criterion: '0.1 ≤ Kn < 10' }
+  }
+  return { key: 'free-molecular', label: 'FREE MOLECULAR FLOW', criterion: 'Kn ≥ 10' }
+}
+
+function formatKnudsenNumber(value: number): string {
+  if (!Number.isFinite(value)) return '∞'
+  if (value < 0.001 || value >= 100) return value.toExponential(2)
+  return value.toFixed(3)
 }
 
 export function SimulationView(props: SimulationViewProps) {
@@ -333,7 +359,7 @@ export function SimulationView(props: SimulationViewProps) {
         const physicalDt = wallDt * 1e-10 * current.speedMultiplier
         current.simulation.advance(
           physicalDt,
-          current.thermostatEnabled ? current.thermostatRate : 0,
+          current.thermostatEnabled ? current.diffuseReflectionProbability : 0,
           current.thermalBathMode === 'all' ? false : current.thermalWalls,
           current.dsmcEnabled,
           current.collisionDiameterAngstrom * 1e-10,
@@ -529,6 +555,8 @@ export function SimulationView(props: SimulationViewProps) {
     }
   }, [props.simulation])
 
+  const flowRegime = getFlowRegime(props.knudsenNumber)
+
   return (
     <div className="simulation-shell">
       <div className="panel-heading overlay-heading">
@@ -536,9 +564,10 @@ export function SimulationView(props: SimulationViewProps) {
           <span className="eyebrow">LIVE PARTICLE FIELD</span>
           <h2>Microscopic view</h2>
         </div>
-        <span className={`status-pill ${props.playing ? 'active' : ''}`}>
-          <i /> {props.playing ? 'RUNNING' : 'PAUSED'}
-        </span>
+        <div className={`flow-regime-indicator ${flowRegime.key}`} title={`Current Knudsen number: ${props.knudsenNumber}`}>
+          <b>{flowRegime.label}</b>
+          <small>{flowRegime.criterion} · Kn = {formatKnudsenNumber(props.knudsenNumber)}</small>
+        </div>
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>

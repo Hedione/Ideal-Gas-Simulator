@@ -325,7 +325,7 @@ describe('dynamics', () => {
   it('six thermal walls relax the gas toward their bath temperature', () => {
     const simulation = new GasSimulation(5_000, 100, 39.948, seededRandom(4))
     simulation.targetTemperature = 800
-    for (let i = 0; i < 1_000; i += 1) simulation.advance(2e-11, 1e20)
+    for (let i = 0; i < 1_000; i += 1) simulation.advance(2e-11, 1)
     expect(simulation.statistics().measuredTemperature / 800).toBeCloseTo(1, 1)
   })
 
@@ -335,7 +335,7 @@ describe('dynamics', () => {
     simulation.positions.set([0.5, 0.5, 0.5])
     simulation.velocities.set([100, 0, 0])
     simulation.speeds[0] = 100
-    simulation.advance(1e-10, 1e20, false)
+    simulation.advance(1e-10, 1, false)
     expect(simulation.speeds[0]).toBeCloseTo(100, 6)
     expect(simulation.wallCollisionCounts[0]).toBe(0)
     expect(simulation.thermalAccommodationCounts[0]).toBe(0)
@@ -343,11 +343,32 @@ describe('dynamics', () => {
     simulation.positions.set([0.5, 0.001, 0.5])
     simulation.velocities.set([0, -100, 0])
     simulation.speeds[0] = 100
-    simulation.advance(2e-11, 1e20, false)
+    simulation.advance(2e-11, 1, false)
     expect(simulation.velocities[1]).toBeGreaterThanOrEqual(0)
     expect(simulation.speeds[0]).not.toBeCloseTo(100, 2)
     expect(simulation.wallCollisionCounts[0]).toBeGreaterThan(0)
     expect(simulation.thermalAccommodationCounts[0]).toBeGreaterThan(0)
+  })
+
+  it('uses the diffuse-reflection probability directly at its endpoints', () => {
+    const simulation = new GasSimulation(1, 300, 39.948, seededRandom(42))
+    simulation.targetTemperature = 1000
+    simulation.positions.set([0.5, 0.001, 0.5])
+    simulation.velocities.set([0, -100, 0])
+    simulation.speeds[0] = 100
+
+    simulation.advance(2e-11, 0, false)
+    expect(simulation.velocities[1]).toBeCloseTo(100, 6)
+    expect(simulation.speeds[0]).toBeCloseTo(100, 6)
+    expect(simulation.thermalAccommodationCounts[0]).toBe(0)
+
+    simulation.positions.set([0.5, 0.001, 0.5])
+    simulation.velocities.set([0, -100, 0])
+    simulation.speeds[0] = 100
+    simulation.advance(2e-11, 1, false)
+    expect(simulation.velocities[1]).toBeGreaterThanOrEqual(0)
+    expect(simulation.speeds[0]).not.toBeCloseTo(100, 2)
+    expect(simulation.thermalAccommodationCounts[0]).toBe(1)
   })
 
   it('all six thermal faces re-emit particles inward', () => {
@@ -361,7 +382,7 @@ describe('dynamics', () => {
       simulation.positions[axis] = positiveFace ? 0.999 : 0.001
       simulation.velocities[axis] = positiveFace ? 100 : -100
       simulation.speeds[0] = 100
-      simulation.advance(2e-11, 1e20, false)
+      simulation.advance(2e-11, 1, false)
       expect(positiveFace ? simulation.velocities[axis] : -simulation.velocities[axis]).toBeLessThanOrEqual(0)
       expect(simulation.isValid()).toBe(true)
     }
@@ -373,13 +394,13 @@ describe('dynamics', () => {
     simulation.positions.set([0.5, 0.5, 0.5])
     simulation.velocities.set([100, 0, 0])
     simulation.speeds[0] = 100
-    simulation.advance(1e-10, 1e20, true)
+    simulation.advance(1e-10, 1, true)
     expect(simulation.speeds[0]).toBeCloseTo(100, 6)
 
     simulation.positions.set([0.99, 0.5, 0.5])
     simulation.velocities.set([100, 0, 0])
     simulation.speeds[0] = 100
-    simulation.advance(2e-10, 1e20, true)
+    simulation.advance(2e-10, 1, true)
     expect(simulation.velocities[0]).toBeLessThanOrEqual(0)
     expect(simulation.speeds[0]).not.toBeCloseTo(100, 2)
     expect(simulation.isValid()).toBe(true)
@@ -392,14 +413,14 @@ describe('dynamics', () => {
     simulation.speeds[0] = 100
     const negativeYWall = [{ axis: 1 as const, positive: false, temperature: 1000 }]
 
-    simulation.advance(2e-10, 1e20, negativeYWall)
+    simulation.advance(2e-10, 1, negativeYWall)
     expect(simulation.speeds[0]).toBeCloseTo(100, 6)
     expect(simulation.thermalAccommodationCounts[0]).toBe(0)
 
     simulation.positions.set([0.5, 0.001, 0.5])
     simulation.velocities.set([0, -100, 0])
     simulation.speeds[0] = 100
-    simulation.advance(2e-11, 1e20, negativeYWall)
+    simulation.advance(2e-11, 1, negativeYWall)
     expect(simulation.velocities[1]).toBeGreaterThanOrEqual(0)
     expect(simulation.speeds[0]).not.toBeCloseTo(100, 2)
     expect(simulation.thermalAccommodationCounts[0]).toBe(1)
@@ -414,8 +435,8 @@ describe('dynamics', () => {
       simulation.speeds[0] = 100
     }
     const primary = { axis: 0 as const, positive: true, temperature: 100 }
-    cold.advance(2e-11, 1e20, [primary, { axis: 1, positive: false, temperature: 100 }])
-    hot.advance(2e-11, 1e20, [primary, { axis: 1, positive: false, temperature: 1600 }])
+    cold.advance(2e-11, 1, [primary, { axis: 1, positive: false, temperature: 100 }])
+    hot.advance(2e-11, 1, [primary, { axis: 1, positive: false, temperature: 1600 }])
 
     expect(hot.speeds[0] / cold.speeds[0]).toBeCloseTo(4, 5)
     expect(hot.velocities[1]).toBeGreaterThanOrEqual(0)
@@ -425,7 +446,7 @@ describe('dynamics', () => {
   it('a single thermal wall preserves an equilibrium temperature without cooling bias', () => {
     const targetTemperature = 500
     const simulation = new GasSimulation(20_000, targetTemperature, 39.948, seededRandom(8))
-    for (let i = 0; i < 500; i += 1) simulation.advance(2e-11, 1e20, true)
+    for (let i = 0; i < 500; i += 1) simulation.advance(2e-11, 1, true)
     expect(simulation.statistics().measuredTemperature / targetTemperature).toBeCloseTo(1, 1)
   })
 
@@ -440,7 +461,7 @@ describe('dynamics', () => {
     const simulation = new GasSimulation(5_000, 50, 131.293, seededRandom(6))
     simulation.setMass(0.1)
     simulation.resampleVelocities(2000)
-    simulation.advance(1e-4, 1e9)
+    simulation.advance(1e-4, 1)
     simulation.advance(Number.NaN)
     expect(simulation.isValid()).toBe(true)
     expect(simulation.positions).toHaveLength(15_000)

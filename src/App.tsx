@@ -51,7 +51,7 @@ function App() {
   const [speedMultiplier, setSpeedMultiplier] = useState(1)
   const [boxLengthMicrometers, setBoxLengthMicrometers] = useState(0.1)
   const [thermostatEnabled, setThermostatEnabled] = useState(true)
-  const [thermostatRateNs, setThermostatRateNs] = useState(0.2)
+  const [diffuseReflectionPercent, setDiffuseReflectionPercent] = useState(100)
   const [thermalBathMode, setThermalBathMode] = useState<ThermalBathMode>('all')
   const [primaryWallAxis, setPrimaryWallAxis] = useState<ThermalWallAxis>(0)
   const [primaryWallPositive, setPrimaryWallPositive] = useState(true)
@@ -81,6 +81,7 @@ function App() {
   const [trackParticle, setTrackParticle] = useState(false)
   const [trackedParticleIndex, setTrackedParticleIndex] = useState(0)
   const [showMomentumSpace, setShowMomentumSpace] = useState(true)
+  const [momentumPointSize, setMomentumPointSize] = useState(1)
   const [showInfo, setShowInfo] = useState(false)
   const [stats, setStats] = useState<SimulationStats>(() => simulation.statistics())
 
@@ -272,7 +273,7 @@ function App() {
     setSpeedMultiplier(1)
     setBoxLengthMicrometers(0.1)
     setThermostatEnabled(true)
-    setThermostatRateNs(0.2)
+    setDiffuseReflectionPercent(100)
     setThermalBathMode('all')
     setPrimaryWallAxis(0)
     setPrimaryWallPositive(true)
@@ -302,6 +303,7 @@ function App() {
     setTrackParticle(false)
     setTrackedParticleIndex(0)
     setShowMomentumSpace(true)
+    setMomentumPointSize(1)
     setShowInfo(false)
     setStats(nextSimulation.statistics())
   }
@@ -414,13 +416,14 @@ function App() {
           playing={playing}
           speedMultiplier={speedMultiplier}
           thermostatEnabled={thermostatEnabled}
-          thermostatRate={thermostatRateNs * 1e9}
+          diffuseReflectionProbability={diffuseReflectionPercent / 100}
           thermalBathMode={thermalBathMode}
           thermalWalls={thermalWalls}
           dsmcEnabled={dsmcEnabled}
           collisionDiameterAngstrom={collisionDiameterAngstrom}
           particleMarkerDiameterAngstrom={particleMarkerDiameterAngstrom}
           particleOcclusionEnabled={particleOcclusionEnabled}
+          knudsenNumber={collisionTheory.knudsenNumber}
           highlightFast={highlightFast}
           speedThreshold={speedThreshold}
           highlightCold={highlightCold}
@@ -445,19 +448,35 @@ function App() {
             </button>
           </div>
           {showMomentumSpace ? (
-            <MomentumSpaceView
-              simulation={simulation}
-              highlightFast={highlightFast}
-              speedThreshold={speedThreshold}
-              highlightCold={highlightCold}
-              coldSpeedThreshold={coldSpeedThreshold}
-              highlightBand={highlightBand}
-              bandCenter={bandCenter}
-              bandHalfWidth={bandHalfWidth}
-              unfocusedOpacity={unfocusedOpacity}
-              trackParticle={trackParticle}
-              trackedParticleIndex={trackedParticleIndex}
-            />
+            <>
+              <MomentumSpaceView
+                simulation={simulation}
+                highlightFast={highlightFast}
+                speedThreshold={speedThreshold}
+                highlightCold={highlightCold}
+                coldSpeedThreshold={coldSpeedThreshold}
+                highlightBand={highlightBand}
+                bandCenter={bandCenter}
+                bandHalfWidth={bandHalfWidth}
+                unfocusedOpacity={unfocusedOpacity}
+                trackParticle={trackParticle}
+                trackedParticleIndex={trackedParticleIndex}
+                pointSize={momentumPointSize}
+              />
+              <label className="momentum-point-size-control">
+                <span>POINT SIZE <b>{momentumPointSize.toFixed(1)}×</b></span>
+                <input
+                  type="range"
+                  min="0.4"
+                  max="3"
+                  step="0.1"
+                  value={momentumPointSize}
+                  onChange={(event) => setMomentumPointSize(Number(event.target.value))}
+                  onDoubleClick={() => setMomentumPointSize(1)}
+                  title="Double-click to reset"
+                />
+              </label>
+            </>
           ) : (
             <div className="momentum-disabled">
               <i aria-hidden="true" />
@@ -520,14 +539,21 @@ function App() {
         <div className="playback-block">
           <span className="control-title">SIMULATION</span>
           <div className="transport">
-            <button className="primary-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>
-              {playing ? 'Ⅱ' : '▶'}
+            <div className="transport-actions">
+              <button className="primary-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>
+                {playing ? 'Ⅱ' : '▶'}
+              </button>
+              <button onClick={reset} aria-label="Reset simulation">↻</button>
+            </div>
+            <button
+              type="button"
+              className={`transport-collisions ${dsmcEnabled ? 'active' : ''}`}
+              aria-pressed={dsmcEnabled}
+              onClick={() => setDsmcEnabled((value) => !value)}
+            >
+              <b>COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
+              <span>DSMC</span>
             </button>
-            <button onClick={reset} aria-label="Reset simulation">↻</button>
-            <button className="preset-button mean" onClick={setUniformMeanSpeed} title="Set every particle to the theoretical mean speed">MEAN</button>
-            <button className="preset-button axis" onClick={() => alignVelocities(0)} title="Align velocities with the x axis">X</button>
-            <button className="preset-button axis" onClick={() => alignVelocities(1)} title="Align velocities with the y axis">Y</button>
-            <button className="preset-button axis" onClick={() => alignVelocities(2)} title="Align velocities with the z axis">Z</button>
           </div>
           <label className="compact-slider">
             <span>
@@ -562,16 +588,26 @@ function App() {
             />
             <span className="slider-endpoints"><i>0.01 μm</i><i>1.00 μm</i></span>
           </label>
-          <div className="simulation-dsmc">
-            <button
-              type="button"
-              className={`dsmc-mode-button ${dsmcEnabled ? 'active' : ''}`}
-              aria-pressed={dsmcEnabled}
-              onClick={() => setDsmcEnabled((value) => !value)}
-            >
-              <b>DSMC COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
-              <span>{dsmcEnabled ? 'hard-sphere binary collisions enabled' : 'collisionless particle motion'}</span>
-            </button>
+          <div className="starting-conditions">
+            <span>STARTING CONDITIONS</span>
+            <div className="starting-condition-grid">
+              <button onClick={setUniformMeanSpeed} title="Give every particle the theoretical mean speed while preserving its direction">
+                <b>MEAN SPEED</b>
+                <small>all |v| = ⟨v⟩</small>
+              </button>
+              <button onClick={() => alignVelocities(0)} title="Align every velocity with the positive or negative x axis">
+                <b>X-ALIGNED</b>
+                <small>velocity along ±x</small>
+              </button>
+              <button onClick={() => alignVelocities(1)} title="Align every velocity with the positive or negative y axis">
+                <b>Y-ALIGNED</b>
+                <small>velocity along ±y</small>
+              </button>
+              <button onClick={() => alignVelocities(2)} title="Align every velocity with the positive or negative z axis">
+                <b>Z-ALIGNED</b>
+                <small>velocity along ±z</small>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -598,8 +634,9 @@ function App() {
           <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
           <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
           <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
-            <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
-            <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} onDoubleClick={() => setThermostatRateNs(0.2)} title="Double-click to reset" />
+            <span>DIFFUSE REFLECTION PROBABILITY <b>{diffuseReflectionPercent}%</b></span>
+            <input type="range" min="0" max="100" step="1" disabled={!thermostatEnabled} value={diffuseReflectionPercent} onChange={(event) => setDiffuseReflectionPercent(Number(event.target.value))} onDoubleClick={() => setDiffuseReflectionPercent(100)} title="0% specular · 100% complete thermal resampling · double-click to reset" />
+            <small>0% SPECULAR · 100% COMPLETE RESAMPLING</small>
           </label>
           <button
             type="button"
@@ -608,7 +645,11 @@ function App() {
             onClick={toggleThermalBath}
           >
             <b>THERMAL BATH {thermostatEnabled ? 'ON' : 'OFF'}</b>
-            <span>{thermostatEnabled ? 'wall-mediated heat exchange enabled' : 'all walls perfectly elastic'}</span>
+            <span>{thermostatEnabled
+              ? diffuseReflectionPercent > 0
+                ? 'wall-mediated heat exchange enabled'
+                : '0% diffuse reflection · walls remain specular'
+              : 'all walls perfectly elastic'}</span>
           </button>
           <div className="thermal-bath-modes" role="group" aria-label="Number of thermal faces">
             {(['all', 'one', 'two'] as ThermalBathMode[]).map((mode) => (
