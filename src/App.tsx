@@ -31,6 +31,12 @@ function formatLength(meters: number): string {
   return `${(meters * 1e9).toFixed(2)} nm`
 }
 
+function formatSimulationRate(multiplier: number): string {
+  const secondsPerSecond = 2e-10 * multiplier
+  if (secondsPerSecond >= 1e-9) return `${(secondsPerSecond * 1e9).toFixed(2)} ns/s`
+  return `${(secondsPerSecond * 1e12).toFixed(secondsPerSecond >= 1e-12 ? 2 : 3)} ps/s`
+}
+
 function App() {
   const [temperature, setTemperature] = useState(300)
   const [temperatureDraft, setTemperatureDraft] = useState('300')
@@ -474,10 +480,16 @@ function App() {
             <button className="preset-button axis" onClick={() => alignVelocities(2)} title="Align velocities with the z axis">Z</button>
           </div>
           <label className="compact-slider">
-            <span>TIME SCALE <b>{speedMultiplier < 0.01 ? speedMultiplier.toFixed(3) : speedMultiplier < 0.1 ? speedMultiplier.toFixed(2) : speedMultiplier.toFixed(1)}×</b></span>
+            <span>
+              TIME SCALE
+              <span className="time-scale-values">
+                <small>{formatSimulationRate(speedMultiplier)}</small>
+                <b>{speedMultiplier < 0.1 ? speedMultiplier.toFixed(2) : speedMultiplier.toFixed(1)}×</b>
+              </span>
+            </span>
             <input
               type="range"
-              min="-1"
+              min="-2"
               max={Math.log10(100)}
               step="0.05"
               value={Math.log10(speedMultiplier)}
@@ -520,7 +532,7 @@ function App() {
                   </option>
                 ))}
               </select>
-              <small>Shows a schematic model beside the box with its exact size ratio.</small>
+              <small>Shows a 1:1 physical-scale model beside the box.</small>
             </label>
           </div>
         </div>
@@ -547,6 +559,10 @@ function App() {
           </div>
           <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
           <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
+          <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
+            <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
+            <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} onDoubleClick={() => setThermostatRateNs(0.2)} title="Double-click to reset" />
+          </label>
           <div className="bath-mode-buttons" role="group" aria-label="Thermal wall mode">
             <button
               type="button"
@@ -568,10 +584,6 @@ function App() {
               <span>one thermal face</span>
             </button>
           </div>
-          <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
-            <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
-            <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} onDoubleClick={() => setThermostatRateNs(0.2)} title="Double-click to reset" />
-          </label>
         </div>
 
         <div className="control-block gas-population-block">
@@ -662,7 +674,7 @@ function App() {
               </button>
             </div>
           </div>
-          <small className="physical-scale-note">Visual diameter only; automatic visibility scaling still applies.</small>
+          <small className="physical-scale-note">Rendered to physical scale relative to the box; independent of particle count.</small>
           <label className="particle-appearance-slider">
             <span>PARTICLE FUZZINESS <b>{Math.round(particleFuzziness * 100)}%</b></span>
             <input

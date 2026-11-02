@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { COLLISION_DIAMETERS_ANGSTROM, GasSimulation, thermalSigma } from '../physics'
+import { GasSimulation, thermalSigma } from '../physics'
 import { formatScaleRatio, getScaleComparison, SCALE_COMPARISONS, ScaleComparisonId, ScaleComparisonShape } from '../scaleComparisons'
 
 interface SimulationViewProps {
@@ -34,13 +34,15 @@ const vertexShader = `
   attribute float particleHighlight;
   varying vec3 vColor;
   varying float vHighlight;
+  varying float vPointCoverage;
   uniform float pointScale;
   void main() {
     vColor = particleColor;
     vHighlight = particleHighlight;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    float emphasis = mix(0.72, 1.65, vHighlight);
-    gl_PointSize = clamp(pointScale * emphasis * (3.2 / -mvPosition.z), 0.75, 40.0);
+    float requestedPointSize = pointScale * (3.2 / -mvPosition.z);
+    gl_PointSize = max(requestedPointSize, 1.0);
+    vPointCoverage = min(1.0, requestedPointSize * requestedPointSize);
     gl_Position = projectionMatrix * mvPosition;
   }
 `
@@ -48,6 +50,7 @@ const vertexShader = `
 const fragmentShader = `
   varying vec3 vColor;
   varying float vHighlight;
+  varying float vPointCoverage;
   uniform float unfocusedOpacity;
   uniform float particleFuzziness;
   uniform float particleOpacity;
@@ -58,7 +61,7 @@ const fragmentShader = `
     float edgeSoftness = mix(0.005, 0.24, particleFuzziness);
     float edgeAlpha = 1.0 - smoothstep(0.5 - edgeSoftness, 0.5, radius);
     float glow = smoothstep(0.5, 0.05, radius);
-    float alpha = particleOpacity * mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow) * edgeAlpha;
+    float alpha = particleOpacity * vPointCoverage * mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow) * edgeAlpha;
     gl_FragColor = vec4(vColor * (0.72 + 0.55 * glow), alpha);
   }
 `
@@ -79,6 +82,21 @@ function writeThermalColor(target: Float32Array, offset: number, normalized: num
   target[offset] = a[0] + (b[0] - a[0]) * mix
   target[offset + 1] = a[1] + (b[1] - a[1]) * mix
   target[offset + 2] = a[2] + (b[2] - a[2]) * mix
+}
+
+function niceReferenceLength(targetMeters: number): number {
+  const exponent = Math.floor(Math.log10(Math.max(targetMeters, 1e-15)))
+  const magnitude = 10 ** exponent
+  const candidates = [1, 2, 5, 10].map((factor) => factor * magnitude)
+  return candidates.reduce((best, candidate) => (
+    Math.abs(Math.log(candidate / targetMeters)) < Math.abs(Math.log(best / targetMeters)) ? candidate : best
+  ))
+}
+
+function formatReferenceLength(meters: number): string {
+  if (meters >= 1e-6) return `${Number((meters * 1e6).toPrecision(3))} µm`
+  if (meters >= 1e-9) return `${Number((meters * 1e9).toPrecision(3))} nm`
+  return `${Number((meters * 1e10).toPrecision(3))} Å`
 }
 
 function comparisonMaterial(color: number, opacity = 0.82): THREE.MeshPhongMaterial {
@@ -282,6 +300,8 @@ export function SimulationView(props: SimulationViewProps) {
   const trackPositionRef = useRef<HTMLSpanElement>(null)
   const trackSpeedRef = useRef<HTMLSpanElement>(null)
   const collisionIndicatorRef = useRef<HTMLDivElement>(null)
+  const lengthReferenceLabelRef = useRef<HTMLSpanElement>(null)
+  const lengthReferenceBarRef = useRef<HTMLElement>(null)
   const settingsRef = useRef(props)
   settingsRef.current = props
 
@@ -300,8 +320,9 @@ export function SimulationView(props: SimulationViewProps) {
     const comparisonLight = new THREE.DirectionalLight(0xffffff, 1.3)
     comparisonLight.position.set(2, 3, 2)
     scene.add(comparisonLight)
-    const camera = new THREE.PerspectiveCamera(43, 1, 0.01, 100)
-    camera.position.set(1.72, 1.28, 1.82)
+    const camera = new THREE.PerspectiveCamera(43, 1, 0.0001, 100)
+    const defaultCameraPosition = new THREE.Vector3(1.72, 1.28, 1.82)
+    camera.position.copy(defaultCameraPosition)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.target.set(0, 0, 0)
@@ -473,7 +494,10 @@ export function SimulationView(props: SimulationViewProps) {
     let lastParticleCollisions = 0
     let collisionIndicatorUntil = 0
     const trackedPosition = new THREE.Vector3()
-    const origin = new THREE.Vector3()
+    const viewTarget = new THREE.Vector3()
+    const drawingBufferSize = new THREE.Vector2()
+    const boxCenterInCameraSpace = new THREE.Vector3()
+    let comparisonViewKey = 'none'
     const animate = (now: number) => {
       animationFrame = requestAnimationFrame(animate)
       const current = settingsRef.current
@@ -503,20 +527,18 @@ export function SimulationView(props: SimulationViewProps) {
         ;(geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
       }
 
-      // Box-length scaling is visual only here: physics remains in normalized
-      // coordinates, while the larger grid makes a shorter physical box read as
-      // smaller. Marker scaling compounds with, but does not alter, the user's
-      // nominal marker-size control.
+      // Physics positions remain normalized to a unit box. Marker diameter is
+      // converted directly from metres to that same coordinate system, so its
+      // rendered size depends only on marker diameter and physical box length.
       const boxVisualScale = Math.max(1, Math.min(100, 1e-6 / current.simulation.boxLengthMeters))
-      const automaticMarkerScale = Math.sqrt(boxVisualScale)
       updateReferenceGrid(boxVisualScale)
-      const populationScale = Math.max(0.32, Math.min(2.2, Math.sqrt(10_000 / current.simulation.count)))
-      const markerDiameterScale = current.particleMarkerDiameterAngstrom / COLLISION_DIAMETERS_ANGSTROM.Argon
-      material.uniforms.pointScale.value = 0.72 * Math.min(window.devicePixelRatio, 1.75) * markerDiameterScale * populationScale * automaticMarkerScale
+      const markerWorldDiameter = current.particleMarkerDiameterAngstrom * 1e-10 / current.simulation.boxLengthMeters
+      renderer.getDrawingBufferSize(drawingBufferSize)
+      material.uniforms.pointScale.value = markerWorldDiameter * drawingBufferSize.y / (6.4 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)))
       material.uniforms.unfocusedOpacity.value = current.unfocusedOpacity
       material.uniforms.particleFuzziness.value = current.particleFuzziness
       material.uniforms.particleOpacity.value = current.particleOpacity
-      trackedMarker.scale.setScalar(Math.max(0.5, markerDiameterScale * automaticMarkerScale))
+      trackedMarker.scale.setScalar(markerWorldDiameter / 0.036)
       ;(trackedMarker.material as THREE.MeshBasicMaterial).opacity = 0.95 * current.particleOpacity
       thermalFace.visible = current.thermostatEnabled && current.singleFaceBath
 
@@ -527,13 +549,65 @@ export function SimulationView(props: SimulationViewProps) {
         const bounds = comparisonBounds.get(selectedComparison.id)
         if (model && bounds) {
           const physicalRatio = selectedComparison.sizeMeters / current.simulation.boxLengthMeters
-          const displayScale = THREE.MathUtils.clamp(0.42 + 0.12 * Math.log10(physicalRatio), 0.18, 0.65)
-          model.scale.setScalar(displayScale)
+          const physicalModelScale = physicalRatio / selectedComparison.modelReferenceSize
+          model.scale.setScalar(physicalModelScale)
           model.position.set(
-            0.62 - bounds.min.x * displayScale,
-            -0.495 - bounds.min.y * displayScale,
+            0.62 - bounds.min.x * physicalModelScale,
+            -0.495 - bounds.min.y * physicalModelScale,
             0.08,
           )
+          const modelSpan = bounds.getSize(new THREE.Vector3()).length() * physicalModelScale
+          ;(scene.fog as THREE.FogExp2).density = 0.09 / Math.max(1, modelSpan * 0.7)
+          controls.minDistance = Math.max(0.002, Math.min(1.2, physicalRatio * 4))
+          controls.maxDistance = Math.max(6, modelSpan * 3)
+          const requiredFarPlane = Math.max(100, modelSpan * 8)
+          if (Math.abs(camera.far - requiredFarPlane) > 1) {
+            camera.far = requiredFarPlane
+            camera.updateProjectionMatrix()
+          }
+          const nextComparisonViewKey = `${selectedComparison.id}:${current.simulation.boxLengthMeters.toExponential(8)}`
+          if (nextComparisonViewKey !== comparisonViewKey) {
+            const modelMinimum = bounds.min.clone().multiplyScalar(physicalModelScale).add(model.position)
+            const modelMaximum = bounds.max.clone().multiplyScalar(physicalModelScale).add(model.position)
+            const combinedMinimum = new THREE.Vector3(
+              Math.min(-0.5, modelMinimum.x),
+              Math.min(-0.5, modelMinimum.y),
+              Math.min(-0.5, modelMinimum.z),
+            )
+            const combinedMaximum = new THREE.Vector3(
+              Math.max(0.5, modelMaximum.x),
+              Math.max(0.5, modelMaximum.y),
+              Math.max(0.5, modelMaximum.z),
+            )
+            const combinedSize = combinedMaximum.clone().sub(combinedMinimum)
+            viewTarget.copy(combinedMinimum).add(combinedMaximum).multiplyScalar(0.5)
+            const cameraDirection = camera.position.clone().sub(controls.target).normalize()
+            const tangentVertical = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))
+            const tangentHorizontal = tangentVertical * camera.aspect
+            const framingDistance = 1.25 * Math.max(
+              combinedSize.y * 0.5 / tangentVertical,
+              combinedSize.x * 0.5 / tangentHorizontal,
+              combinedSize.z * 0.75,
+              2.2,
+            )
+            controls.target.copy(viewTarget)
+            camera.position.copy(viewTarget).addScaledVector(cameraDirection, framingDistance)
+            comparisonViewKey = nextComparisonViewKey
+          }
+        }
+      } else {
+        ;(scene.fog as THREE.FogExp2).density = 0.09
+        controls.minDistance = 1.2
+        controls.maxDistance = 6
+        if (camera.far !== 100) {
+          camera.far = 100
+          camera.updateProjectionMatrix()
+        }
+        if (comparisonViewKey !== 'none') {
+          viewTarget.set(0, 0, 0)
+          controls.target.copy(viewTarget)
+          camera.position.copy(defaultCameraPosition)
+          comparisonViewKey = 'none'
         }
       }
 
@@ -548,7 +622,7 @@ export function SimulationView(props: SimulationViewProps) {
         trackedMarker.visible = true
         trackedTrail.visible = true
         trackedMarker.position.copy(trackedPosition)
-        controls.target.lerp(origin, 0.08)
+        controls.target.lerp(viewTarget, 0.08)
 
         if (activeTrackedParticle !== trackedIndex) {
           activeTrackedParticle = trackedIndex
@@ -617,7 +691,7 @@ export function SimulationView(props: SimulationViewProps) {
         trackedTrail.visible = false
         activeTrackedParticle = -1
         previousTrackedPosition = null
-        controls.target.lerp(origin, 0.08)
+        controls.target.lerp(viewTarget, 0.08)
       }
       if (frame % 2 === 0 || !current.playing) {
         const sigma = thermalSigma(current.simulation.targetTemperature, current.simulation.massAmu)
@@ -666,6 +740,15 @@ export function SimulationView(props: SimulationViewProps) {
       }
       frame += 1
       controls.update()
+      camera.updateMatrixWorld()
+      boxCenterInCameraSpace.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
+      const boxDepth = Math.max(0.001, -boxCenterInCameraSpace.z)
+      const cssPixelsPerWorldUnit = host.clientHeight / (2 * boxDepth * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)))
+      const targetReferenceMeters = 90 * current.simulation.boxLengthMeters / Math.max(cssPixelsPerWorldUnit, 1e-6)
+      const referenceMeters = niceReferenceLength(targetReferenceMeters)
+      const referencePixels = referenceMeters / current.simulation.boxLengthMeters * cssPixelsPerWorldUnit
+      if (lengthReferenceBarRef.current) lengthReferenceBarRef.current.style.width = `${referencePixels.toFixed(2)}px`
+      if (lengthReferenceLabelRef.current) lengthReferenceLabelRef.current.textContent = formatReferenceLength(referenceMeters)
       renderer.render(scene, camera)
     }
     animationFrame = requestAnimationFrame(animate)
@@ -710,13 +793,13 @@ export function SimulationView(props: SimulationViewProps) {
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
-      <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · particles enlarged for visibility</div>
+      <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · marker diameter to scale</div>
       {selectedComparison && (
         <div className="scale-comparison-badge">
           <span>REAL-WORLD COMPARISON</span>
           <b>{selectedComparison.label}</b>
           <small>{selectedComparison.sizeLabel} {selectedComparison.measurement} · {formatScaleRatio(comparisonRatio)} box</small>
-          <i>adaptive display scale</i>
+          <i>1:1 physical scale · auto-framed</i>
         </div>
       )}
       {props.thermostatEnabled && props.singleFaceBath && (
@@ -730,6 +813,10 @@ export function SimulationView(props: SimulationViewProps) {
           <div ref={collisionIndicatorRef} className="collision-indicator">○ NO RECENT COLLISION</div>
         </div>
       )}
+      <div className="length-reference" aria-label="Live physical length reference">
+        <span ref={lengthReferenceLabelRef}>—</span>
+        <i ref={lengthReferenceBarRef} />
+      </div>
       <div
         className={`color-key ${props.trackParticle ? 'tracking-key' : props.highlightBand ? 'band-threshold-key' : props.highlightFast && props.highlightCold ? 'dual-threshold-key' : props.highlightFast ? 'threshold-key' : props.highlightCold ? 'cold-threshold-key' : ''}`}
         aria-label={props.trackParticle ? 'Tracked particle color legend' : props.highlightBand ? 'Speed band color legend' : 'Particle speed color legend'}

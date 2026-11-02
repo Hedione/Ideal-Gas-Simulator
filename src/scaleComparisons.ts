@@ -14,6 +14,7 @@ export interface ScaleComparison {
   sizeMeters: number
   sizeLabel: string
   measurement: string
+  modelReferenceSize: number
 }
 
 export const SCALE_COMPARISONS: ScaleComparison[] = [
@@ -23,6 +24,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 7.5e-6,
     sizeLabel: '7.5 µm',
     measurement: 'diameter',
+    modelReferenceSize: 1,
   },
   {
     id: 'bacterium',
@@ -30,6 +32,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 2e-6,
     sizeLabel: '2.0 µm',
     measurement: 'length',
+    modelReferenceSize: 1,
   },
   {
     id: 'platelet',
@@ -37,6 +40,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 2.5e-6,
     sizeLabel: '2.5 µm',
     measurement: 'diameter',
+    modelReferenceSize: 1,
   },
   {
     id: 'coronavirus',
@@ -44,6 +48,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 100e-9,
     sizeLabel: '100 nm',
     measurement: 'core diameter',
+    modelReferenceSize: 0.7,
   },
   {
     id: 'atp-synthase',
@@ -51,6 +56,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 10e-9,
     sizeLabel: '10 nm',
     measurement: 'head diameter',
+    modelReferenceSize: 0.86,
   },
   {
     id: 'dna',
@@ -58,6 +64,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 2e-9,
     sizeLabel: '2 nm',
     measurement: 'diameter',
+    modelReferenceSize: 1,
   },
   {
     id: 'carbon-nanotube',
@@ -65,6 +72,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 1.3e-9,
     sizeLabel: '1.3 nm',
     measurement: 'diameter',
+    modelReferenceSize: 1,
   },
   {
     id: 'buckyball',
@@ -72,6 +80,7 @@ export const SCALE_COMPARISONS: ScaleComparison[] = [
     sizeMeters: 1e-9,
     sizeLabel: '1 nm',
     measurement: 'diameter',
+    modelReferenceSize: 1,
   },
 ]
 
