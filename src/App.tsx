@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DistributionChart } from './components/DistributionChart'
 import { MomentumSpaceView } from './components/MomentumSpaceView'
 import { SimulationView } from './components/SimulationView'
-import { SCALE_COMPARISONS, ScaleComparisonId } from './scaleComparisons'
 import {
   BOLTZMANN,
   COLLISION_DIAMETERS_ANGSTROM,
@@ -12,11 +11,14 @@ import {
   maxwellBoltzmannQuantile,
   mostProbableSpeed,
   SimulationStats,
+  ThermalWallAxis,
+  ThermalWallContact,
   theoreticalMeanSpeed,
   theoreticalRmsSpeed,
 } from './physics'
 
 type SpeciesSelection = GasName | 'Custom'
+type ThermalBathMode = 'all' | 'one' | 'two'
 
 function formatSimulationTime(seconds: number): string {
   if (seconds < 1e-9) return `${(seconds * 1e12).toFixed(1)} ps`
@@ -32,7 +34,7 @@ function formatLength(meters: number): string {
 }
 
 function formatSimulationRate(multiplier: number): string {
-  const secondsPerSecond = 2e-10 * multiplier
+  const secondsPerSecond = 1e-10 * multiplier
   if (secondsPerSecond >= 1e-9) return `${(secondsPerSecond * 1e9).toFixed(2)} ns/s`
   return `${(secondsPerSecond * 1e12).toFixed(secondsPerSecond >= 1e-12 ? 2 : 3)} ps/s`
 }
@@ -50,14 +52,18 @@ function App() {
   const [boxLengthMicrometers, setBoxLengthMicrometers] = useState(0.1)
   const [thermostatEnabled, setThermostatEnabled] = useState(true)
   const [thermostatRateNs, setThermostatRateNs] = useState(0.2)
-  const [singleFaceBath, setSingleFaceBath] = useState(false)
+  const [thermalBathMode, setThermalBathMode] = useState<ThermalBathMode>('all')
+  const [primaryWallAxis, setPrimaryWallAxis] = useState<ThermalWallAxis>(0)
+  const [primaryWallPositive, setPrimaryWallPositive] = useState(true)
+  const [secondaryWallAxis, setSecondaryWallAxis] = useState<ThermalWallAxis>(0)
+  const [secondaryWallPositive, setSecondaryWallPositive] = useState(false)
+  const [secondaryWallTemperature, setSecondaryWallTemperature] = useState(300)
+  const [secondaryWallMatchesMain, setSecondaryWallMatchesMain] = useState(true)
   const [dsmcEnabled, setDsmcEnabled] = useState(true)
   const [collisionDiameterAngstrom, setCollisionDiameterAngstrom] = useState(COLLISION_DIAMETERS_ANGSTROM.Argon)
   const [particleMarkerDiameterAngstrom, setParticleMarkerDiameterAngstrom] = useState(COLLISION_DIAMETERS_ANGSTROM.Argon)
   const [matchMarkerToCollisionDiameter, setMatchMarkerToCollisionDiameter] = useState(true)
-  const [particleFuzziness, setParticleFuzziness] = useState(0.35)
-  const [particleOpacity, setParticleOpacity] = useState(1)
-  const [scaleComparison, setScaleComparison] = useState<ScaleComparisonId>('none')
+  const [particleOcclusionEnabled, setParticleOcclusionEnabled] = useState(false)
   const [bins, setBins] = useState(100)
   const [highlightFast, setHighlightFast] = useState(false)
   const [speedThreshold, setSpeedThreshold] = useState(750)
@@ -267,14 +273,18 @@ function App() {
     setBoxLengthMicrometers(0.1)
     setThermostatEnabled(true)
     setThermostatRateNs(0.2)
-    setSingleFaceBath(false)
+    setThermalBathMode('all')
+    setPrimaryWallAxis(0)
+    setPrimaryWallPositive(true)
+    setSecondaryWallAxis(0)
+    setSecondaryWallPositive(false)
+    setSecondaryWallTemperature(300)
+    setSecondaryWallMatchesMain(true)
     setDsmcEnabled(true)
     setCollisionDiameterAngstrom(COLLISION_DIAMETERS_ANGSTROM.Argon)
     setParticleMarkerDiameterAngstrom(COLLISION_DIAMETERS_ANGSTROM.Argon)
     setMatchMarkerToCollisionDiameter(true)
-    setParticleFuzziness(0.35)
-    setParticleOpacity(1)
-    setScaleComparison('none')
+    setParticleOcclusionEnabled(false)
     setBins(100)
     setHighlightFast(false)
     setSpeedThreshold(750)
@@ -297,13 +307,54 @@ function App() {
   }
 
   const toggleThermalBath = () => {
-    if (thermostatEnabled) {
-      setThermostatEnabled(false)
-      setSingleFaceBath(false)
-    } else {
-      setThermostatEnabled(true)
+    setThermostatEnabled((value) => !value)
+  }
+
+  const selectThermalBathMode = (mode: ThermalBathMode) => {
+    if (mode === 'two' && thermalBathMode !== 'two') {
+      setSecondaryWallTemperature(temperature)
+      setSecondaryWallMatchesMain(true)
+    }
+    setThermalBathMode(mode)
+  }
+
+  const selectPrimaryWallAxis = (axis: ThermalWallAxis) => {
+    setPrimaryWallAxis(axis)
+    if (axis === secondaryWallAxis && primaryWallPositive === secondaryWallPositive) {
+      setSecondaryWallPositive(!primaryWallPositive)
     }
   }
+
+  const togglePrimaryWallSign = () => {
+    const nextPositive = !primaryWallPositive
+    setPrimaryWallPositive(nextPositive)
+    if (primaryWallAxis === secondaryWallAxis && nextPositive === secondaryWallPositive) {
+      setSecondaryWallPositive(!nextPositive)
+    }
+  }
+
+  const selectSecondaryWallAxis = (axis: ThermalWallAxis) => {
+    setSecondaryWallAxis(axis)
+    if (axis === primaryWallAxis) setSecondaryWallPositive(!primaryWallPositive)
+  }
+
+  const effectiveSecondaryWallTemperature = secondaryWallMatchesMain ? temperature : secondaryWallTemperature
+  const thermalWalls = useMemo<ThermalWallContact[]>(() => {
+    if (thermalBathMode === 'all') return []
+    const walls: ThermalWallContact[] = [{
+      axis: primaryWallAxis,
+      positive: primaryWallPositive,
+      temperature,
+    }]
+    if (thermalBathMode === 'two') {
+      walls.push({
+        axis: secondaryWallAxis,
+        positive: secondaryWallPositive,
+        temperature: effectiveSecondaryWallTemperature,
+      })
+    }
+    return walls
+  }, [effectiveSecondaryWallTemperature, primaryWallAxis, primaryWallPositive, secondaryWallAxis, secondaryWallPositive, temperature, thermalBathMode])
 
   const setUniformMeanSpeed = () => {
     simulation.setUniformMeanSpeed()
@@ -353,7 +404,7 @@ function App() {
         <aside className="info-banner">
           <button onClick={() => setShowInfo(false)} aria-label="Close information">×</button>
           <strong>What you’re seeing</strong>
-          <p>Each velocity component is sampled independently from a Gaussian with variance k<sub>B</sub>T/m. Thermal exchange occurs only at wall contacts: all six faces by default, or only the highlighted +X face when restricted. Optional DSMC collisions conserve pair momentum and energy while allowing collisional relaxation.</p>
+          <p>Each velocity component is sampled independently from a Gaussian with variance k<sub>B</sub>T/m. Thermal exchange occurs only at wall contacts: all six faces by default, or one or two user-selected faces. Optional DSMC collisions conserve pair momentum and energy while allowing collisional relaxation.</p>
         </aside>
       )}
 
@@ -364,13 +415,12 @@ function App() {
           speedMultiplier={speedMultiplier}
           thermostatEnabled={thermostatEnabled}
           thermostatRate={thermostatRateNs * 1e9}
-          singleFaceBath={singleFaceBath}
+          thermalBathMode={thermalBathMode}
+          thermalWalls={thermalWalls}
           dsmcEnabled={dsmcEnabled}
           collisionDiameterAngstrom={collisionDiameterAngstrom}
           particleMarkerDiameterAngstrom={particleMarkerDiameterAngstrom}
-          particleFuzziness={particleFuzziness}
-          particleOpacity={particleOpacity}
-          scaleComparison={scaleComparison}
+          particleOcclusionEnabled={particleOcclusionEnabled}
           highlightFast={highlightFast}
           speedThreshold={speedThreshold}
           highlightCold={highlightCold}
@@ -522,18 +572,6 @@ function App() {
               <b>DSMC COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
               <span>{dsmcEnabled ? 'hard-sphere binary collisions enabled' : 'collisionless particle motion'}</span>
             </button>
-            <label className="scale-comparison-control">
-              <span>REAL-WORLD SCALE COMPARISON</span>
-              <select value={scaleComparison} onChange={(event) => setScaleComparison(event.target.value as ScaleComparisonId)}>
-                <option value="none">None</option>
-                {SCALE_COMPARISONS.map((comparison) => (
-                  <option key={comparison.id} value={comparison.id}>
-                    {comparison.label} — {comparison.sizeLabel}
-                  </option>
-                ))}
-              </select>
-              <small>Shows a 1:1 physical-scale model beside the box.</small>
-            </label>
           </div>
         </div>
 
@@ -563,27 +601,108 @@ function App() {
             <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
             <input type="range" min="0.05" max="1" step="0.05" disabled={!thermostatEnabled} value={thermostatRateNs} onChange={(event) => setThermostatRateNs(Number(event.target.value))} onDoubleClick={() => setThermostatRateNs(0.2)} title="Double-click to reset" />
           </label>
-          <div className="bath-mode-buttons" role="group" aria-label="Thermal wall mode">
-            <button
-              type="button"
-              className={`bath-mode-button thermal ${thermostatEnabled ? 'active' : ''}`}
-              aria-pressed={thermostatEnabled}
-              onClick={toggleThermalBath}
-            >
-              <b>THERMAL BATH</b>
-              <span>all six faces</span>
-            </button>
-            <button
-              type="button"
-              className={`bath-mode-button single-face ${singleFaceBath ? 'active' : ''}`}
-              aria-pressed={singleFaceBath}
-              disabled={!thermostatEnabled}
-              onClick={() => setSingleFaceBath((value) => !value)}
-            >
-              <b>RESTRICT +X</b>
-              <span>one thermal face</span>
-            </button>
+          <button
+            type="button"
+            className={`thermal-bath-master ${thermostatEnabled ? 'active' : ''}`}
+            aria-pressed={thermostatEnabled}
+            onClick={toggleThermalBath}
+          >
+            <b>THERMAL BATH {thermostatEnabled ? 'ON' : 'OFF'}</b>
+            <span>{thermostatEnabled ? 'wall-mediated heat exchange enabled' : 'all walls perfectly elastic'}</span>
+          </button>
+          <div className="thermal-bath-modes" role="group" aria-label="Number of thermal faces">
+            {(['all', 'one', 'two'] as ThermalBathMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={thermalBathMode === mode ? 'selected' : ''}
+                aria-pressed={thermalBathMode === mode}
+                disabled={!thermostatEnabled}
+                onClick={() => selectThermalBathMode(mode)}
+              >
+                {mode === 'all' ? 'ALL FACES' : mode === 'one' ? 'ONE FACE' : 'TWO FACES'}
+              </button>
+            ))}
           </div>
+          {thermostatEnabled && thermalBathMode !== 'all' && (
+            <div className="thermal-face-config">
+              <span>THERMAL FACE 1</span>
+              <div className="thermal-face-selector" role="group" aria-label="First thermal face">
+                <button type="button" className="sign" onClick={togglePrimaryWallSign} aria-label="Toggle first face sign">{primaryWallPositive ? '+' : '−'}</button>
+                {(['X', 'Y', 'Z'] as const).map((axisLabel, axis) => (
+                  <button
+                    key={axisLabel}
+                    type="button"
+                    className={primaryWallAxis === axis ? 'selected' : ''}
+                    aria-pressed={primaryWallAxis === axis}
+                    onClick={() => selectPrimaryWallAxis(axis as ThermalWallAxis)}
+                  >
+                    {axisLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {thermostatEnabled && thermalBathMode === 'two' && (
+            <div className="secondary-wall-config">
+              <div className="thermal-face-config">
+                <span>THERMAL FACE 2</span>
+                <div className="thermal-face-selector" role="group" aria-label="Second thermal face">
+                  <button
+                    type="button"
+                    className="sign"
+                    disabled={secondaryWallAxis === primaryWallAxis}
+                    onClick={() => setSecondaryWallPositive((value) => !value)}
+                    aria-label="Toggle second face sign"
+                    title={secondaryWallAxis === primaryWallAxis ? 'Opposite sign required when both faces share an axis' : undefined}
+                  >
+                    {secondaryWallPositive ? '+' : '−'}
+                  </button>
+                  {(['X', 'Y', 'Z'] as const).map((axisLabel, axis) => (
+                    <button
+                      key={axisLabel}
+                      type="button"
+                      className={secondaryWallAxis === axis ? 'selected' : ''}
+                      aria-pressed={secondaryWallAxis === axis}
+                      onClick={() => selectSecondaryWallAxis(axis as ThermalWallAxis)}
+                    >
+                      {axisLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="secondary-temperature-heading">
+                <span>FACE 2 TEMPERATURE <b>{effectiveSecondaryWallTemperature.toLocaleString()} K</b></span>
+                <button
+                  type="button"
+                  className={secondaryWallMatchesMain ? 'matching' : ''}
+                  aria-pressed={secondaryWallMatchesMain}
+                  onClick={() => {
+                    if (secondaryWallMatchesMain) setSecondaryWallTemperature(temperature)
+                    setSecondaryWallMatchesMain((value) => !value)
+                  }}
+                >
+                  {secondaryWallMatchesMain ? 'DISABLE MATCHING' : 'MATCH MAIN TEMP'}
+                </button>
+              </div>
+              <input
+                className="wide-slider secondary-temperature-slider"
+                type="range"
+                min="5"
+                max="5000"
+                step="5"
+                disabled={secondaryWallMatchesMain}
+                value={effectiveSecondaryWallTemperature}
+                onChange={(event) => setSecondaryWallTemperature(Number(event.target.value))}
+                onDoubleClick={() => {
+                  setSecondaryWallTemperature(temperature)
+                  setSecondaryWallMatchesMain(true)
+                }}
+                title="Double-click to match the main temperature"
+              />
+              <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
+            </div>
+          )}
         </div>
 
         <div className="control-block gas-population-block">
@@ -675,32 +794,15 @@ function App() {
             </div>
           </div>
           <small className="physical-scale-note">Rendered to physical scale relative to the box; independent of particle count.</small>
-          <label className="particle-appearance-slider">
-            <span>PARTICLE FUZZINESS <b>{Math.round(particleFuzziness * 100)}%</b></span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={particleFuzziness}
-              onChange={(event) => setParticleFuzziness(Number(event.target.value))}
-              onDoubleClick={() => setParticleFuzziness(0.35)}
-              title="Double-click to reset"
-            />
-          </label>
-          <label className="particle-appearance-slider">
-            <span>PARTICLE OPACITY <b>{Math.round(particleOpacity * 100)}%</b></span>
-            <input
-              type="range"
-              min="0.05"
-              max="1"
-              step="0.01"
-              value={particleOpacity}
-              onChange={(event) => setParticleOpacity(Number(event.target.value))}
-              onDoubleClick={() => setParticleOpacity(1)}
-              title="Double-click to reset"
-            />
-          </label>
+          <button
+            type="button"
+            className={`particle-occlusion-button ${particleOcclusionEnabled ? 'active' : ''}`}
+            aria-pressed={particleOcclusionEnabled}
+            onClick={() => setParticleOcclusionEnabled((value) => !value)}
+          >
+            <b>PARTICLE OCCLUSION {particleOcclusionEnabled ? 'ON' : 'OFF'}</b>
+            <span>{particleOcclusionEnabled ? 'nearest particles hide particles behind them' : 'additive transparent particle cloud'}</span>
+          </button>
         </div>
 
         <div className="control-block focus-block">
@@ -822,7 +924,7 @@ function App() {
 
       <footer>
         <p><strong>MODEL:</strong> {dsmcEnabled ? 'dilute hard-sphere DSMC gas with elastic binary collisions' : 'nonrelativistic, collisionless ideal gas with perfectly elastic walls'}</p>
-        <p>Thermal momentum exchange occurs only at wall contacts. Restricted mode uses only the highlighted +X face; DSMC handles particle collisions.</p>
+        <p>Thermal momentum exchange occurs only at wall contacts. One- and two-face modes use the highlighted selected walls; DSMC handles particle collisions.</p>
       </footer>
     </main>
   )

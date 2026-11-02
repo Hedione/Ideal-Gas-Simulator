@@ -5,7 +5,7 @@
 The thermal bath is a boundary reservoir. Particles can receive random momentum and energy changes **only when they contact an eligible wall**:
 
 - normal bath mode: all six faces are thermal;
-- **Restrict bath to +X**: only the highlighted +X face is thermal;
+- **One Face** with +X selected: only the highlighted +X face is thermal;
 - interior free flight: no bath perturbation is possible.
 
 The cold-particle focus is purely diagnostic. It highlights particles whose instantaneous scalar speed is below the selected cutoff. It neither creates particles nor changes their velocities.
@@ -96,7 +96,7 @@ For equilibrium Argon at 300 K:
 
 Half of these changes are entries and half are exits on average. The figures are analytical estimates; actual values fluctuate with finite sampling, frame timing, DSMC collisions, and the evolving temperature.
 
-With +X-only contact, an isotropic gas reaches that one face at roughly one-sixth of the all-face contact rate, so wall-driven cold turnover should also be approximately six times slower.
+With one-face contact, an isotropic gas reaches the selected face at roughly one-sixth of the all-face contact rate, so wall-driven cold turnover should also be approximately six times slower.
 
 ## 4. Behavior by mode
 
@@ -104,10 +104,10 @@ With +X-only contact, an isotropic gas reaches that one face at roughly one-sixt
 |---|---|---|
 | Bath off, DSMC off | No | No; reflection is specular. |
 | Six-face bath on, DSMC off | No | Yes, through accommodation at any face. |
-| +X-only bath on, DSMC off | No | Yes, but only at the +X face. |
+| One-face bath on, DSMC off | No | Yes, but only at the selected face. |
 | Bath off, DSMC on | Yes, during a particle collision | No; walls remain specular. |
 | Six-face bath on, DSMC on | Yes, during DSMC collisions | Yes, at any face. |
-| +X-only bath on, DSMC on | Yes, during DSMC collisions | Yes, only at +X. |
+| One-face bath on, DSMC on | Yes, during DSMC collisions | Yes, only at the selected face. |
 
 DSMC collisions are different from wall heating. They conserve pair momentum and kinetic energy but redistribute both between collision partners. A particle can therefore cross the cold cutoff after a DSMC collision even with the bath disabled.
 
@@ -136,12 +136,12 @@ Bath-enabled motion is internally substepped at high playback speeds so ordinary
 
 Its color classification and speed should remain unchanged during free flight. A change may occur only when it reaches a wall.
 
-### Compare all-face and +X-only contact
+### Compare all-face and one-face contact
 
 1. enable cold focus;
 2. keep DSMC off;
 3. observe turnover with all six faces active;
-4. enable **Restrict bath to +X**.
+4. select **One Face** and choose +X.
 
 Turnover should become less frequent and localized to trajectories that reach the highlighted wall.
 
@@ -157,4 +157,4 @@ The flux-weighted normal distribution is essential. An ordinary half-Gaussian wo
 
 ## Conclusion
 
-The bath no longer applies random momentum changes in the box interior. Thermal perturbations occur only through wall contact—at all six faces normally or only at +X when restricted. Cold-particle generation and extinction remain visible because accommodated wall contacts replace velocities with thermal samples, but the effect is now a boundary heat-exchange process. Any additional interior turnover with the bath off is caused by optional DSMC particle collisions, not by the wall reservoir.
+The bath no longer applies random momentum changes in the box interior. Thermal perturbations occur only through wall contact—at all six faces normally or at the selected one or two faces in restricted modes. Cold-particle generation and extinction remain visible because accommodated wall contacts replace velocities with thermal samples, but the effect is now a boundary heat-exchange process. Any additional interior turnover with the bath off is caused by optional DSMC particle collisions, not by the wall reservoir.

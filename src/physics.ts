@@ -21,6 +21,15 @@ export const COLLISION_DIAMETERS_ANGSTROM: Record<GasName, number> = {
 
 export type GasName = keyof typeof GAS_SPECIES
 export type RandomSource = () => number
+export type ThermalWallAxis = 0 | 1 | 2
+
+export interface ThermalWallContact {
+  axis: ThermalWallAxis
+  positive: boolean
+  temperature: number
+}
+
+export type ThermalWallSelection = boolean | readonly ThermalWallContact[]
 
 export interface SimulationStats {
   count: number
@@ -209,9 +218,11 @@ function foldCoordinate(position: number, velocity: number): [number, number] {
 interface AxisWallCrossings {
   total: number
   positiveCount: number
+  negativeCount: number
   lastPositive: boolean
   lastFraction: number
   lastPositiveFraction: number
+  lastNegativeFraction: number
 }
 
 function isPositivePhysicalFace(boundary: number): boolean {
@@ -221,7 +232,7 @@ function isPositivePhysicalFace(boundary: number): boolean {
 /** Summarizes wall crossings along one unfolded, mirrored-box coordinate. */
 function axisWallCrossings(start: number, end: number): AxisWallCrossings {
   if (end === start) {
-    return { total: 0, positiveCount: 0, lastPositive: false, lastFraction: -1, lastPositiveFraction: -1 }
+    return { total: 0, positiveCount: 0, negativeCount: 0, lastPositive: false, lastFraction: -1, lastPositiveFraction: -1, lastNegativeFraction: -1 }
   }
 
   const direction = end > start ? 1 : -1
@@ -231,11 +242,12 @@ function axisWallCrossings(start: number, end: number): AxisWallCrossings {
     ? Math.max(0, lastBoundary - firstBoundary + 1)
     : Math.max(0, firstBoundary - lastBoundary + 1)
   if (total === 0) {
-    return { total: 0, positiveCount: 0, lastPositive: false, lastFraction: -1, lastPositiveFraction: -1 }
+    return { total: 0, positiveCount: 0, negativeCount: 0, lastPositive: false, lastFraction: -1, lastPositiveFraction: -1, lastNegativeFraction: -1 }
   }
 
   const firstIsPositive = isPositivePhysicalFace(firstBoundary)
   const positiveCount = Math.floor(total / 2) + (total % 2 === 1 && firstIsPositive ? 1 : 0)
+  const negativeCount = total - positiveCount
   const lastPositive = isPositivePhysicalFace(lastBoundary)
   const lastFraction = (lastBoundary - start) / (end - start)
   let lastPositiveFraction = -1
@@ -243,7 +255,12 @@ function axisWallCrossings(start: number, end: number): AxisWallCrossings {
     const lastPositiveBoundary = lastPositive ? lastBoundary : lastBoundary - direction
     lastPositiveFraction = (lastPositiveBoundary - start) / (end - start)
   }
-  return { total, positiveCount, lastPositive, lastFraction, lastPositiveFraction }
+  let lastNegativeFraction = -1
+  if (negativeCount > 0) {
+    const lastNegativeBoundary = lastPositive ? lastBoundary - direction : lastBoundary
+    lastNegativeFraction = (lastNegativeBoundary - start) / (end - start)
+  }
+  return { total, positiveCount, negativeCount, lastPositive, lastFraction, lastPositiveFraction, lastNegativeFraction }
 }
 
 export class GasSimulation {
@@ -491,7 +508,7 @@ export class GasSimulation {
   advance(
     dt: number,
     thermostatRate = 0,
-    singleFaceThermostat = false,
+    thermalWalls: ThermalWallSelection = false,
     dsmcEnabled = false,
     collisionDiameterMeters = COLLISION_DIAMETERS_ANGSTROM.Argon * 1e-10,
   ): void {
@@ -503,14 +520,18 @@ export class GasSimulation {
     this.collisionDiagnostics.measuredCollisionRate = 0
     this.collisionDiagnostics.accuracyLimited = false
 
+    const configuredWallTemperature = Array.isArray(thermalWalls)
+      ? thermalWalls.reduce((maximum, wall) => Math.max(maximum, wall.temperature), this.targetTemperature)
+      : this.targetTemperature
+
     if (!dsmcEnabled || !Number.isFinite(collisionDiameterMeters) || collisionDiameterMeters <= 0) {
-      const speedBound = Math.max(1, characteristicMaxSpeed(this.targetTemperature, this.massAmu))
+      const speedBound = Math.max(1, characteristicMaxSpeed(configuredWallTemperature, this.massAmu))
       const maximumBathStep = (0.2 * this.boxLengthMeters) / speedBound
       const requiredBathSubsteps = thermostatRate > 0 ? Math.max(1, Math.ceil(dt / maximumBathStep)) : 1
       const bathSubsteps = Math.min(64, requiredBathSubsteps)
       const bathStep = dt / bathSubsteps
       for (let step = 0; step < bathSubsteps; step += 1) {
-        this.advanceParticles(bathStep, thermostatRate, singleFaceThermostat)
+        this.advanceParticles(bathStep, thermostatRate, thermalWalls)
       }
       this.elapsedTime += dt
       return
@@ -521,7 +542,7 @@ export class GasSimulation {
     this.updateCollisionScales(collisionDiameterMeters)
 
     const cellWidth = this.boxLengthMeters / gridDimension
-    const speedBound = Math.max(1, characteristicMaxSpeed(this.targetTemperature, this.massAmu))
+    const speedBound = Math.max(1, characteristicMaxSpeed(configuredWallTemperature, this.massAmu))
     const maximumStep = (0.5 * cellWidth) / speedBound
     const requiredSubsteps = Math.max(1, Math.ceil(dt / maximumStep))
     const substeps = Math.min(64, requiredSubsteps)
@@ -531,7 +552,7 @@ export class GasSimulation {
     let accepted = 0
     let trials = 0
     for (let step = 0; step < substeps; step += 1) {
-      this.advanceParticles(substepDt, thermostatRate, singleFaceThermostat)
+      this.advanceParticles(substepDt, thermostatRate, thermalWalls)
       const result = this.applyDsmcCollisions(substepDt, collisionDiameterMeters)
       accepted += result.accepted
       trials += result.trials
@@ -544,14 +565,13 @@ export class GasSimulation {
     this.elapsedTime += dt
   }
 
-  private advanceParticles(dt: number, thermostatRate: number, singleFaceThermostat: boolean): void {
-    const sigma = thermalSigma(this.targetTemperature, this.massAmu)
-
+  private advanceParticles(dt: number, thermostatRate: number, thermalWalls: ThermalWallSelection): void {
     for (let particle = 0; particle < this.count; particle += 1) {
       const index = particle * 3
       let eligibleContacts = 0
       let thermalAxis = -1
       let thermalPositive = false
+      let thermalTemperature = this.targetTemperature
       let latestContactFraction = -1
       for (let axis = 0; axis < 3; axis += 1) {
         const component = index + axis
@@ -560,7 +580,21 @@ export class GasSimulation {
         const crossings = axisWallCrossings(this.positions[component], proposed)
         if (crossings.total > 0) this.wallCollisionCounts[particle] += crossings.total
         if (thermostatRate > 0) {
-          if (singleFaceThermostat) {
+          if (Array.isArray(thermalWalls)) {
+            for (const wall of thermalWalls) {
+              if (wall.axis !== axis) continue
+              const contactCount = wall.positive ? crossings.positiveCount : crossings.negativeCount
+              const contactFraction = wall.positive ? crossings.lastPositiveFraction : crossings.lastNegativeFraction
+              if (contactCount <= 0) continue
+              eligibleContacts += contactCount
+              if (contactFraction > latestContactFraction) {
+                latestContactFraction = contactFraction
+                thermalAxis = axis
+                thermalPositive = wall.positive
+                thermalTemperature = Math.max(0.1, wall.temperature)
+              }
+            }
+          } else if (thermalWalls) {
             if (axis === 0 && crossings.positiveCount > 0) {
               eligibleContacts += crossings.positiveCount
               if (crossings.lastPositiveFraction > latestContactFraction) {
@@ -585,6 +619,7 @@ export class GasSimulation {
       if (thermalAxis >= 0 && eligibleContacts > 0) {
         const accommodationProbability = 1 - Math.exp(-thermostatRate * 1e-9 * eligibleContacts)
         if (this.random() < accommodationProbability) {
+          const sigma = thermalSigma(thermalTemperature, this.massAmu)
           this.velocities[index] = gaussian(this.random) * sigma
           this.velocities[index + 1] = gaussian(this.random) * sigma
           this.velocities[index + 2] = gaussian(this.random) * sigma

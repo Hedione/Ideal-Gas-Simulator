@@ -1,30 +1,18 @@
-# Maxwell–Boltzmann Lab
+# Hedione's Ideal Gas Simulator
 
-An interactive, browser-based statistical mechanics laboratory for a three-dimensional classical ideal gas. It combines a real-time Three.js particle field with a live, normalized speed histogram and the exact Maxwell–Boltzmann probability density.
+> **Launch the interactive simulation at [hedione.github.io/Ideal-Gas-Simulator](https://hedione.github.io/Ideal-Gas-Simulator/).** No installation is required.
 
-For a detailed derivation of the physical and numerical model, see [THEORY.md](THEORY.md).
+Hedione's Ideal Gas Simulator is an interactive, browser-based statistical mechanics laboratory for a three-dimensional classical gas. It combines a real-time particle field, DSMC molecular collisions, thermal-wall interactions, a rotatable momentum-space view, and a live Maxwell–Boltzmann speed distribution.
 
-For an implementation and cost analysis of adding particle–particle collisions, see [COLLISION_PHYSICS_FEASIBILITY.md](COLLISION_PHYSICS_FEASIBILITY.md).
+The simulation is designed for exploring how temperature, molecular mass, population, volume, collision diameter, and thermal contact affect microscopic motion and ensemble statistics. All physics and rendering run locally in the visitor's browser; performance depends on the device, particle count, and enabled views.
 
-For an explanation of cold-particle turnover under thermostat and DSMC modes, see [THERMAL_BATH_COLD_PARTICLE_FLUCTUATIONS.md](THERMAL_BATH_COLD_PARTICLE_FLUCTUATIONS.md).
+Additional background:
 
-## Run in the browser with GitHub Pages
+- [Theory and numerical model](THEORY.md)
+- [Particle-collision feasibility and implementation analysis](COLLISION_PHYSICS_FEASIBILITY.md)
+- [Cold-particle turnover under thermostat and DSMC modes](THERMAL_BATH_COLD_PARTICLE_FLUCTUATIONS.md)
 
-This project can run directly from GitHub Pages without a server. The deployed files are the same optimized JavaScript, WebGL, and typed-array simulation used locally; GitHub Pages only delivers those static files. Physics updates, DSMC collisions, charting, and 3D rendering execute on each visitor's device, so publishing does not reduce numerical fidelity or impose a remote-compute limit. Performance still depends on the visitor's CPU/GPU, browser, selected particle count, and whether momentum space is enabled.
-
-The repository includes [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml). It tests the physics, builds the Vite application, and deploys `dist/` whenever `main` is pushed.
-
-To enable it after creating the GitHub repository:
-
-1. Push this project to the repository's `main` branch.
-2. Open **Settings → Pages** in GitHub.
-3. Under **Build and deployment**, choose **GitHub Actions** as the source.
-4. Open the **Actions** tab and run **Test and deploy to GitHub Pages**, or push another commit to `main`.
-5. Use the URL reported by the deployment job. Project repositories normally publish at `https://USERNAME.github.io/REPOSITORY/`.
-
-Vite uses relative production asset paths, so the same build works at a repository subpath, an account-level `github.io` site, or a custom domain.
-
-## Run locally
+## Local development
 
 Requires Node.js 18 or newer.
 
@@ -35,7 +23,7 @@ npm run dev
 
 Open the local URL printed by Vite (normally `http://localhost:5173`).
 
-Useful verification commands:
+Verification commands:
 
 ```bash
 npm test
@@ -47,15 +35,15 @@ npm run build
 - The box has a logarithmically controlled physical side length from 0.01–1.00 μm, with 0.10 μm at startup. Display coordinates are normalized to `[0, 1]`, while wall transit, collision cells, density, pressure, mean free path, velocities, and elapsed time remain in SI units.
 - Each velocity component is independently sampled from `Normal(0, k_B T / m)`. Scalar speeds therefore follow the three-dimensional Maxwell–Boltzmann law.
 - Collisionless mode uses noninteracting points. Optional hard-sphere DSMC mode performs stochastic, spatially local binary collisions that conserve pair momentum and kinetic energy. Wall collisions are perfectly elastic, and a triangle-wave coordinate fold handles any number of wall crossings in one update.
-- At the 1× default, the visual clock advances about 0.2 ns of physical time per wall-clock second. The displayed scale was multiplied by 100 while the base timestep was divided by 100, so this relabeling does not change the prior visual or physical rate.
+- At the 1× default, the simulation advances about 0.1 ns (100 ps) of physical time per wall-clock second. A live ps/s or ns/s readout shows the physical rate at every time-scale setting.
 - The measured kinetic temperature is calculated from the actual ensemble using `T = m ⟨v²⟩ / (3 k_B)`. Finite samples fluctuate statistically around the target.
 - The histogram uses every simulated particle, is normalized by `N × bin width`, and updates independently from rendering.
 
 ### Thermal bath
 
-Thermal momentum exchange occurs only when a particle contacts a wall. With **Thermal bath** enabled, all six faces act as diffuse thermal reservoirs. Each wall contact is accommodated with probability `1 − exp(−ν × 1 ns)`, where `ν` is the wall-coupling control; otherwise it reflects specularly. No random bath event can occur during interior free flight.
+Thermal momentum exchange occurs only when a particle contacts a wall. With **Thermal bath** enabled, visitors can use all six faces or select one or two specific faces from ±X, ±Y, and ±Z. Each eligible wall contact is accommodated with probability `1 − exp(−ν × 1 ns)`, where `ν` is the wall-coupling control; otherwise it reflects specularly. No random bath event can occur during interior free flight.
 
-With **Restrict bath to +X** enabled, only crossings of the +X wall are eligible for accommodation. The active face is shown with a faint amber surface overlay. Turning the restriction off applies the same thermal-wall rule to all six faces.
+One-face mode uses the main temperature. Two-face mode adds a second selected wall whose temperature initially tracks the main temperature and can be decoupled with **Disable matching**. Independently heated faces can drive a nonequilibrium energy flow through the gas. Selected faces are identified by faint surface overlays and live temperature badges.
 
 ### Thermal-wall sampling and equilibrium
 
@@ -71,23 +59,18 @@ When the bath and DSMC are disabled, wall reflections only reverse velocity comp
 - Play/pause, a quick ensemble reset at current settings, and a header-level RESET SIMULATION button that restores every startup option without reloading the page; plus a logarithmic 0.01×–100× physical time scale (1× default) with a live ps/s or ns/s rate, a logarithmic 0.01–1.00 μm box-side slider (0.10 μm default), wall-coupling rate, and histogram bin count beside the chart (100 bins by default)
 - Nonequilibrium presets that set every particle to the theoretical mean speed or align all velocity vectors with the x, y, or z axis while preserving their signs and kinetic energy; each preset restarts the experiment clock and collision counters
 - Permanently enabled speed coloring, analytical curve, characteristic-speed markers, and a reference grid that cross-fades between power-of-two refinement levels. Each refinement doubles the divisions on both axes, splitting every square into four, while center axes use the same subdued color as other grid lines.
-- Large side-by-side thermal-wall mode buttons: the six-face bath starts enabled, while the +X-only mode is available only when the bath is on and highlights the active thermal face
+- A full-width thermal-bath control with All Faces, One Face, and Two Faces modes. One-face mode accepts any ±X/±Y/±Z wall; two-face mode adds another distinct wall and an optionally independent second temperature.
 - Spatial hard-sphere DSMC collisions enabled by default, with a large highlighted ON/OFF button below box size in the Simulation module; species collision-diameter presets, a 0.1–20 Å collision-diameter slider, adaptive collision cells, and live mean-free-path/Knudsen diagnostics remain available
-- Particle marker diameter, edge fuzziness, and opacity controls. Diameter is expressed in ångströms and rendered directly as `marker diameter / box side length`, independent of particle count or focus mode; its default-on match mode keeps the visual diameter synchronized with the collision diameter. Subpixel markers preserve projected area through alpha coverage rather than being artificially enlarged.
-- Selectable real-world scale comparisons render schematic red blood cell, E. coli, platelet, coronavirus, ATP synthase, DNA, carbon nanotube, and C₆₀ buckyball models beside the gas box at their true 1:1 physical ratio. The camera automatically frames the box and selected object and permits the wider zoom range needed across their size range.
+- Particle marker diameter and occlusion controls. Diameter is expressed in ångströms and rendered directly as `marker diameter / box side length`, independent of particle count or focus mode; its default-on match mode keeps the visual diameter synchronized with the collision diameter. Particle occlusion is off by default and can be enabled to use the depth buffer so only the nearest particles along each line of sight are visible.
 - A live map-style length bar in the physical view is calculated from camera projection and the current box side length, so it remains physically accurate while box length, orbit, or zoom changes.
 - Independent hot-, cold-, and speed-band focus modes, plus random single-particle tracking. The hot cutoff defaults to 750 m/s. The cold slider spans 0–500 m/s and the hot slider spans 0–5,000 m/s, while direct positive numeric entry may exceed either slider range. Top 1% and Bottom 1% buttons calculate the corresponding Maxwell–Boltzmann speed quantiles from the current temperature and particle mass. Speed-band focus selects particles within an adjustable center ± half-width window. A shared opacity control adjusts all nonfocused particles, matching highlights appear in physical and momentum space, and matching dashed cutoff markers appear on the speed-distribution chart.
 - Double-click reset for every slider, plus a temperature field that accepts an empty draft and commits only on Enter or blur
 - A freely rotatable 3D momentum-space panel that starts enabled and has a large ON/OFF control for reducing GPU load when needed. It sits between the equally tall physical-space and speed-distribution panels. The physical-space panel receives the largest width allocation, while the distribution panel uses a compact 3×3 observable grid. Momentum space contains every particle, is normalized to a ±5 thermal-momentum-standard-deviation cube, and refreshes at a reduced data cadence for performance.
 - Live population indicators for number density in particles/cm³ and ideal-gas pressure in pascals
-- Random single-particle tracking with a box-centered camera, trajectory trail, live position/speed readout, muted background particles, and distinct indicators for elastic-wall, thermal-wall, and DSMC collisions
+- Random single-particle tracking with neutral-cyan point highlighting matching the hot/cold/band focus style, a trajectory trail, live position/speed readout, muted background particles, and distinct indicators for elastic-wall, thermal-wall, and DSMC collisions
 - Mouse orbit, zoom, and pan in the 3D view
 
-Particle marker diameter and comparison models are rendered at their physical ratio to the box. At diameters below one device pixel, alpha coverage preserves projected area, though no raster display can show literal subpixel geometry.
-
-### Scale-comparison references
-
-Representative dimensions and shapes use the [NIST/DOE Scale of Things chart](https://www.nist.gov/document/doescaleofthingschartpdf), [NCBI red-cell and platelet dimensions](https://pmc.ncbi.nlm.nih.gov/articles/PMC6687464/), [NCBI E. coli dimensions](https://www.ncbi.nlm.nih.gov/books/NBK224756/), [SARS-CoV-2 morphometry](https://pubmed.ncbi.nlm.nih.gov/33568700/), and the [NHGRI DNA double-helix description](https://www.genome.gov/about-genomics/fact-sheets/Deoxyribonucleic-Acid-Fact-Sheet). Renderings are original schematic Three.js geometry rather than copied source artwork.
+Particle marker diameter is rendered at its physical ratio to the box. At diameters below one device pixel, alpha coverage preserves projected area, though no raster display can show literal subpixel geometry.
 
 ## Tests
 
@@ -95,7 +78,7 @@ The Vitest suite checks Gaussian component statistics, mean-square and mean spee
 
 ## Implementation notes
 
-The simulation uses contiguous `Float32Array` buffers for positions, velocities, speeds, and colors, plus `Uint32Array` event counters for per-particle wall, thermal-accommodation, and DSMC collisions. Three.js renders all particles as one `Points` draw call using `BufferGeometry` and a small custom shader. React is not updated on animation frames; dashboard statistics and Chart.js each run on lower-frequency independent timers.
+The simulation uses contiguous `Float32Array` buffers for positions, velocities, speeds, and colors, plus `Uint32Array` event counters for per-particle wall, thermal-accommodation, and DSMC collisions. Three.js renders the cloud with shared `BufferGeometry` and custom shaders. Optional occlusion mode performs a depth-only particle pass followed by a color pass restricted to the nearest fragments; the default additive mode uses the color pass alone. React is not updated on animation frames, while dashboard statistics and Chart.js run on lower-frequency independent timers.
 
 ## License
 

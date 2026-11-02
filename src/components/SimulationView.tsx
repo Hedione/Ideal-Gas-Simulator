@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GasSimulation, thermalSigma } from '../physics'
-import { formatScaleRatio, getScaleComparison, SCALE_COMPARISONS, ScaleComparisonId, ScaleComparisonShape } from '../scaleComparisons'
+import { GasSimulation, thermalSigma, ThermalWallContact } from '../physics'
 
 interface SimulationViewProps {
   simulation: GasSimulation
@@ -10,13 +9,12 @@ interface SimulationViewProps {
   speedMultiplier: number
   thermostatEnabled: boolean
   thermostatRate: number
-  singleFaceBath: boolean
+  thermalBathMode: 'all' | 'one' | 'two'
+  thermalWalls: readonly ThermalWallContact[]
   dsmcEnabled: boolean
   collisionDiameterAngstrom: number
   particleMarkerDiameterAngstrom: number
-  particleFuzziness: number
-  particleOpacity: number
-  scaleComparison: ScaleComparisonId
+  particleOcclusionEnabled: boolean
   highlightFast: boolean
   speedThreshold: number
   highlightCold: boolean
@@ -52,17 +50,21 @@ const fragmentShader = `
   varying float vHighlight;
   varying float vPointCoverage;
   uniform float unfocusedOpacity;
-  uniform float particleFuzziness;
-  uniform float particleOpacity;
   void main() {
     vec2 centered = gl_PointCoord - vec2(0.5);
     float radius = length(centered);
     if (radius > 0.5) discard;
-    float edgeSoftness = mix(0.005, 0.24, particleFuzziness);
-    float edgeAlpha = 1.0 - smoothstep(0.5 - edgeSoftness, 0.5, radius);
+    float edgeAlpha = 1.0 - smoothstep(0.42, 0.5, radius);
     float glow = smoothstep(0.5, 0.05, radius);
-    float alpha = particleOpacity * vPointCoverage * mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow) * edgeAlpha;
+    float alpha = vPointCoverage * mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow) * edgeAlpha;
     gl_FragColor = vec4(vColor * (0.72 + 0.55 * glow), alpha);
+  }
+`
+
+const depthFragmentShader = `
+  void main() {
+    vec2 centered = gl_PointCoord - vec2(0.5);
+    if (length(centered) > 0.5) discard;
   }
 `
 
@@ -99,200 +101,23 @@ function formatReferenceLength(meters: number): string {
   return `${Number((meters * 1e10).toPrecision(3))} Å`
 }
 
-function comparisonMaterial(color: number, opacity = 0.82): THREE.MeshPhongMaterial {
-  return new THREE.MeshPhongMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.14,
-    shininess: 52,
-    transparent: true,
-    opacity,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  })
-}
-
-function cylinderBetween(
-  start: THREE.Vector3,
-  end: THREE.Vector3,
-  radius: number,
-  material: THREE.Material,
-  radialSegments = 8,
-): THREE.Mesh {
-  const direction = end.clone().sub(start)
-  const cylinder = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, direction.length(), radialSegments),
-    material,
-  )
-  cylinder.position.copy(start).add(end).multiplyScalar(0.5)
-  cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize())
-  return cylinder
-}
-
-function createRedBloodCell(): THREE.Group {
-  const group = new THREE.Group()
-  const profile: THREE.Vector2[] = []
-  const segments = 18
-  for (let i = 0; i <= segments; i += 1) {
-    const radius = 0.5 * i / segments
-    const thickness = 0.045 + 0.13 * Math.sin(Math.PI * i / segments) ** 0.72
-    profile.push(new THREE.Vector2(radius, thickness))
-  }
-  for (let i = segments; i >= 0; i -= 1) {
-    const radius = 0.5 * i / segments
-    const thickness = 0.045 + 0.13 * Math.sin(Math.PI * i / segments) ** 0.72
-    profile.push(new THREE.Vector2(radius, -thickness))
-  }
-  const cell = new THREE.Mesh(new THREE.LatheGeometry(profile, 52), comparisonMaterial(0xd84655, 0.78))
-  cell.rotation.z = -0.18
-  group.add(cell)
-  return group
-}
-
-function createBacterium(): THREE.Group {
-  const group = new THREE.Group()
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.23, 0.54, 8, 20), comparisonMaterial(0x62c99a, 0.8))
-  body.rotation.z = Math.PI / 2
-  group.add(body)
-
-  const flagellumMaterial = new THREE.MeshBasicMaterial({ color: 0x86e0b8, transparent: true, opacity: 0.66 })
-  for (let strand = 0; strand < 3; strand += 1) {
-    const points: THREE.Vector3[] = []
-    for (let i = 0; i <= 18; i += 1) {
-      const progress = i / 18
-      points.push(new THREE.Vector3(
-        -0.5 - progress * 0.56,
-        0.08 * Math.sin(progress * Math.PI * 4 + strand * 2.1),
-        (strand - 1) * 0.055,
-      ))
-    }
-    group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 36, 0.009, 5, false), flagellumMaterial))
-  }
-  return group
-}
-
-function createCoronavirus(): THREE.Group {
-  const group = new THREE.Group()
-  group.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 3), comparisonMaterial(0xc99d49, 0.7)))
-  const stemMaterial = comparisonMaterial(0xe4bb66, 0.85)
-  const tipMaterial = comparisonMaterial(0xf0cd82, 0.9)
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-  for (let i = 0; i < 26; i += 1) {
-    const y = 1 - (i / 25) * 2
-    const radial = Math.sqrt(Math.max(0, 1 - y * y))
-    const angle = goldenAngle * i
-    const direction = new THREE.Vector3(Math.cos(angle) * radial, y, Math.sin(angle) * radial)
-    const stemStart = direction.clone().multiplyScalar(0.33)
-    const stemEnd = direction.clone().multiplyScalar(0.48)
-    group.add(cylinderBetween(stemStart, stemEnd, 0.014, stemMaterial, 6))
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 6), tipMaterial)
-    tip.position.copy(direction).multiplyScalar(0.52)
-    group.add(tip)
-  }
-  return group
-}
-
-function createDna(): THREE.Group {
-  const group = new THREE.Group()
-  const strandMaterials = [comparisonMaterial(0x57c8f2, 0.9), comparisonMaterial(0xff799c, 0.9)]
-  const strandPoints: THREE.Vector3[][] = [[], []]
-  for (let strand = 0; strand < 2; strand += 1) {
-    for (let i = 0; i <= 64; i += 1) {
-      const progress = i / 64
-      const angle = progress * Math.PI * 4 + strand * Math.PI
-      strandPoints[strand].push(new THREE.Vector3(0.5 * Math.cos(angle), (progress - 0.5) * 1.38, 0.5 * Math.sin(angle)))
-    }
-    group.add(new THREE.Mesh(
-      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(strandPoints[strand]), 96, 0.035, 7, false),
-      strandMaterials[strand],
-    ))
-  }
-  const rungMaterial = comparisonMaterial(0xd7e7df, 0.56)
-  for (let i = 4; i < 64; i += 6) {
-    group.add(cylinderBetween(strandPoints[0][i], strandPoints[1][i], 0.017, rungMaterial, 6))
-  }
-  group.rotation.z = -0.14
-  return group
-}
-
-function createBuckyball(): THREE.Group {
-  const group = new THREE.Group()
-  const geometry = new THREE.IcosahedronGeometry(0.5, 2)
-  group.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x82cbd5, transparent: true, opacity: 0.06, depthWrite: false })))
-  group.add(new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry, 12),
-    new THREE.LineBasicMaterial({ color: 0xa5e2e8, transparent: true, opacity: 0.78 }),
-  ))
-  group.rotation.set(0.15, 0.25, 0)
-  return group
-}
-
-function createPlatelet(): THREE.Group {
-  const group = new THREE.Group()
-  const platelet = new THREE.Mesh(new THREE.SphereGeometry(0.5, 30, 18), comparisonMaterial(0xc881cf, 0.72))
-  platelet.scale.set(1, 0.22, 0.72)
-  platelet.rotation.z = 0.16
-  group.add(platelet)
-  for (let i = 0; i < 7; i += 1) {
-    const granule = new THREE.Mesh(new THREE.SphereGeometry(0.035 + (i % 3) * 0.008, 7, 5), comparisonMaterial(0xf0b3ea, 0.8))
-    const angle = i * 2.31
-    granule.position.set(Math.cos(angle) * 0.27, 0.105, Math.sin(angle) * 0.19)
-    group.add(granule)
-  }
-  return group
-}
-
-function createAtpSynthase(): THREE.Group {
-  const group = new THREE.Group()
-  const proteinMaterial = comparisonMaterial(0xe3aa51, 0.82)
-  const rotorMaterial = comparisonMaterial(0x77c5ce, 0.82)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.43, 24, 16), proteinMaterial)
-  head.scale.y = 0.72
-  head.position.y = 0.26
-  group.add(head)
-  group.add(cylinderBetween(new THREE.Vector3(0, -0.3, 0), new THREE.Vector3(0, 0.18, 0), 0.055, rotorMaterial, 10))
-  const membraneRotor = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.18, 20), proteinMaterial)
-  membraneRotor.position.y = -0.34
-  group.add(membraneRotor)
-  const membrane = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.035, 32), comparisonMaterial(0x557e91, 0.25))
-  membrane.position.y = -0.34
-  group.add(membrane)
-  return group
-}
-
-function createCarbonNanotube(): THREE.Group {
-  const group = new THREE.Group()
-  const tube = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.5, 1.45, 18, 8, true),
-    new THREE.MeshBasicMaterial({ color: 0xa7c3cc, wireframe: true, transparent: true, opacity: 0.76 }),
-  )
-  tube.rotation.z = Math.PI / 2
-  group.add(tube)
-  return group
-}
-
-function createComparisonModel(shape: ScaleComparisonShape): THREE.Group {
-  switch (shape) {
-    case 'red-blood-cell': return createRedBloodCell()
-    case 'bacterium': return createBacterium()
-    case 'coronavirus': return createCoronavirus()
-    case 'dna': return createDna()
-    case 'buckyball': return createBuckyball()
-    case 'platelet': return createPlatelet()
-    case 'atp-synthase': return createAtpSynthase()
-    case 'carbon-nanotube': return createCarbonNanotube()
+function placeThermalFace(target: THREE.Mesh, wall: ThermalWallContact): void {
+  target.position.set(0, 0, 0)
+  target.rotation.set(0, 0, 0)
+  const coordinate = wall.positive ? 0.501 : -0.501
+  if (wall.axis === 0) {
+    target.position.x = coordinate
+    target.rotation.y = Math.PI / 2
+  } else if (wall.axis === 1) {
+    target.position.y = coordinate
+    target.rotation.x = Math.PI / 2
+  } else {
+    target.position.z = coordinate
   }
 }
 
-function disposeComparisonModels(root: THREE.Object3D): void {
-  root.traverse((child) => {
-    const renderable = child as THREE.Mesh | THREE.LineSegments
-    if (renderable.geometry) renderable.geometry.dispose()
-    if (renderable.material) {
-      const materials = Array.isArray(renderable.material) ? renderable.material : [renderable.material]
-      materials.forEach((item) => item.dispose())
-    }
-  })
+function thermalFaceLabel(wall: ThermalWallContact): string {
+  return `${wall.positive ? '+' : '−'}${['X', 'Y', 'Z'][wall.axis]}`
 }
 
 export function SimulationView(props: SimulationViewProps) {
@@ -316,13 +141,8 @@ export function SimulationView(props: SimulationViewProps) {
 
     const scene = new THREE.Scene()
     scene.fog = new THREE.FogExp2(0x050b10, 0.09)
-    scene.add(new THREE.HemisphereLight(0x9bdde5, 0x142128, 1.25))
-    const comparisonLight = new THREE.DirectionalLight(0xffffff, 1.3)
-    comparisonLight.position.set(2, 3, 2)
-    scene.add(comparisonLight)
     const camera = new THREE.PerspectiveCamera(43, 1, 0.0001, 100)
-    const defaultCameraPosition = new THREE.Vector3(1.72, 1.28, 1.82)
-    camera.position.copy(defaultCameraPosition)
+    camera.position.set(1.72, 1.28, 1.82)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.target.set(0, 0, 0)
@@ -342,27 +162,32 @@ export function SimulationView(props: SimulationViewProps) {
       uniforms: {
         pointScale: { value: 2.15 * Math.min(window.devicePixelRatio, 1.75) },
         unfocusedOpacity: { value: props.unfocusedOpacity },
-        particleFuzziness: { value: props.particleFuzziness },
-        particleOpacity: { value: props.particleOpacity },
       },
       vertexShader,
       fragmentShader,
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      depthFunc: props.particleOcclusionEnabled ? THREE.EqualDepth : THREE.LessEqualDepth,
+      blending: props.particleOcclusionEnabled ? THREE.NormalBlending : THREE.AdditiveBlending,
     })
+    const depthMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        pointScale: { value: 2.15 * Math.min(window.devicePixelRatio, 1.75) },
+      },
+      vertexShader,
+      fragmentShader: depthFragmentShader,
+      colorWrite: false,
+      depthWrite: true,
+      depthTest: true,
+    })
+    let particleOcclusionActive = props.particleOcclusionEnabled
+    const depthPoints = new THREE.Points(geometry, depthMaterial)
     const points = new THREE.Points(geometry, material)
     // Center the point cloud without mutating the shared normalized physics buffer.
+    depthPoints.position.set(-0.5, -0.5, -0.5)
     points.position.set(-0.5, -0.5, -0.5)
-    scene.add(points)
-
-    const trackedMarker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.018, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0xc8f7ff, depthTest: false, transparent: true, opacity: 0.95 }),
-    )
-    trackedMarker.renderOrder = 10
-    trackedMarker.visible = false
-    scene.add(trackedMarker)
+    depthPoints.visible = props.particleOcclusionEnabled
+    scene.add(depthPoints, points)
 
     const maximumTrailSegments = 120
     const trailPositions = new Float32Array(maximumTrailSegments * 6)
@@ -394,10 +219,10 @@ export function SimulationView(props: SimulationViewProps) {
     )
     scene.add(innerBox)
 
-    const thermalFace = new THREE.Mesh(
+    const makeThermalFace = (color: number) => new THREE.Mesh(
       new THREE.PlaneGeometry(0.985, 0.985),
       new THREE.MeshBasicMaterial({
-        color: 0xffb547,
+        color,
         transparent: true,
         opacity: 0.1,
         side: THREE.DoubleSide,
@@ -405,22 +230,11 @@ export function SimulationView(props: SimulationViewProps) {
         blending: THREE.AdditiveBlending,
       }),
     )
-    thermalFace.position.x = 0.501
-    thermalFace.rotation.y = Math.PI / 2
-    thermalFace.visible = false
-    scene.add(thermalFace)
-
-    const comparisonRoot = new THREE.Group()
-    const comparisonModels = new Map<ScaleComparisonShape, THREE.Group>()
-    const comparisonBounds = new Map<ScaleComparisonShape, THREE.Box3>()
-    for (const comparison of SCALE_COMPARISONS) {
-      const model = createComparisonModel(comparison.id)
-      comparisonBounds.set(comparison.id, new THREE.Box3().setFromObject(model))
-      model.visible = false
-      comparisonModels.set(comparison.id, model)
-      comparisonRoot.add(model)
-    }
-    scene.add(comparisonRoot)
+    const primaryThermalFace = makeThermalFace(0xffb547)
+    const secondaryThermalFace = makeThermalFace(0xd878ff)
+    primaryThermalFace.visible = false
+    secondaryThermalFace.visible = false
+    scene.add(primaryThermalFace, secondaryThermalFace)
 
     const baseGridDivisions = 10
     const gridOpacity = 0.82
@@ -497,7 +311,6 @@ export function SimulationView(props: SimulationViewProps) {
     const viewTarget = new THREE.Vector3()
     const drawingBufferSize = new THREE.Vector2()
     const boxCenterInCameraSpace = new THREE.Vector3()
-    let comparisonViewKey = 'none'
     const animate = (now: number) => {
       animationFrame = requestAnimationFrame(animate)
       const current = settingsRef.current
@@ -512,15 +325,16 @@ export function SimulationView(props: SimulationViewProps) {
         highlights = new Float32Array(current.simulation.count)
         geometry.setAttribute('particleColor', new THREE.BufferAttribute(colors, 3))
         geometry.setAttribute('particleHighlight', new THREE.BufferAttribute(highlights, 1))
+        depthPoints.geometry = geometry
         points.geometry = geometry
         previousGeometry.dispose()
       }
       if (current.playing) {
-        const physicalDt = wallDt * 2e-10 * current.speedMultiplier
+        const physicalDt = wallDt * 1e-10 * current.speedMultiplier
         current.simulation.advance(
           physicalDt,
           current.thermostatEnabled ? current.thermostatRate : 0,
-          current.singleFaceBath,
+          current.thermalBathMode === 'all' ? false : current.thermalWalls,
           current.dsmcEnabled,
           current.collisionDiameterAngstrom * 1e-10,
         )
@@ -535,81 +349,22 @@ export function SimulationView(props: SimulationViewProps) {
       const markerWorldDiameter = current.particleMarkerDiameterAngstrom * 1e-10 / current.simulation.boxLengthMeters
       renderer.getDrawingBufferSize(drawingBufferSize)
       material.uniforms.pointScale.value = markerWorldDiameter * drawingBufferSize.y / (6.4 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)))
+      depthMaterial.uniforms.pointScale.value = material.uniforms.pointScale.value
       material.uniforms.unfocusedOpacity.value = current.unfocusedOpacity
-      material.uniforms.particleFuzziness.value = current.particleFuzziness
-      material.uniforms.particleOpacity.value = current.particleOpacity
-      trackedMarker.scale.setScalar(markerWorldDiameter / 0.036)
-      ;(trackedMarker.material as THREE.MeshBasicMaterial).opacity = 0.95 * current.particleOpacity
-      thermalFace.visible = current.thermostatEnabled && current.singleFaceBath
-
-      const selectedComparison = getScaleComparison(current.scaleComparison)
-      for (const [id, model] of comparisonModels) model.visible = id === selectedComparison?.id
-      if (selectedComparison) {
-        const model = comparisonModels.get(selectedComparison.id)
-        const bounds = comparisonBounds.get(selectedComparison.id)
-        if (model && bounds) {
-          const physicalRatio = selectedComparison.sizeMeters / current.simulation.boxLengthMeters
-          const physicalModelScale = physicalRatio / selectedComparison.modelReferenceSize
-          model.scale.setScalar(physicalModelScale)
-          model.position.set(
-            0.62 - bounds.min.x * physicalModelScale,
-            -0.495 - bounds.min.y * physicalModelScale,
-            0.08,
-          )
-          const modelSpan = bounds.getSize(new THREE.Vector3()).length() * physicalModelScale
-          ;(scene.fog as THREE.FogExp2).density = 0.09 / Math.max(1, modelSpan * 0.7)
-          controls.minDistance = Math.max(0.002, Math.min(1.2, physicalRatio * 4))
-          controls.maxDistance = Math.max(6, modelSpan * 3)
-          const requiredFarPlane = Math.max(100, modelSpan * 8)
-          if (Math.abs(camera.far - requiredFarPlane) > 1) {
-            camera.far = requiredFarPlane
-            camera.updateProjectionMatrix()
-          }
-          const nextComparisonViewKey = `${selectedComparison.id}:${current.simulation.boxLengthMeters.toExponential(8)}`
-          if (nextComparisonViewKey !== comparisonViewKey) {
-            const modelMinimum = bounds.min.clone().multiplyScalar(physicalModelScale).add(model.position)
-            const modelMaximum = bounds.max.clone().multiplyScalar(physicalModelScale).add(model.position)
-            const combinedMinimum = new THREE.Vector3(
-              Math.min(-0.5, modelMinimum.x),
-              Math.min(-0.5, modelMinimum.y),
-              Math.min(-0.5, modelMinimum.z),
-            )
-            const combinedMaximum = new THREE.Vector3(
-              Math.max(0.5, modelMaximum.x),
-              Math.max(0.5, modelMaximum.y),
-              Math.max(0.5, modelMaximum.z),
-            )
-            const combinedSize = combinedMaximum.clone().sub(combinedMinimum)
-            viewTarget.copy(combinedMinimum).add(combinedMaximum).multiplyScalar(0.5)
-            const cameraDirection = camera.position.clone().sub(controls.target).normalize()
-            const tangentVertical = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))
-            const tangentHorizontal = tangentVertical * camera.aspect
-            const framingDistance = 1.25 * Math.max(
-              combinedSize.y * 0.5 / tangentVertical,
-              combinedSize.x * 0.5 / tangentHorizontal,
-              combinedSize.z * 0.75,
-              2.2,
-            )
-            controls.target.copy(viewTarget)
-            camera.position.copy(viewTarget).addScaledVector(cameraDirection, framingDistance)
-            comparisonViewKey = nextComparisonViewKey
-          }
-        }
-      } else {
-        ;(scene.fog as THREE.FogExp2).density = 0.09
-        controls.minDistance = 1.2
-        controls.maxDistance = 6
-        if (camera.far !== 100) {
-          camera.far = 100
-          camera.updateProjectionMatrix()
-        }
-        if (comparisonViewKey !== 'none') {
-          viewTarget.set(0, 0, 0)
-          controls.target.copy(viewTarget)
-          camera.position.copy(defaultCameraPosition)
-          comparisonViewKey = 'none'
-        }
+      if (current.particleOcclusionEnabled !== particleOcclusionActive) {
+        particleOcclusionActive = current.particleOcclusionEnabled
+        depthPoints.visible = particleOcclusionActive
+        material.blending = particleOcclusionActive ? THREE.NormalBlending : THREE.AdditiveBlending
+        material.depthFunc = particleOcclusionActive ? THREE.EqualDepth : THREE.LessEqualDepth
+        material.needsUpdate = true
       }
+      const showSelectedThermalFaces = current.thermostatEnabled && current.thermalBathMode !== 'all'
+      const primaryWall = current.thermalWalls[0]
+      const secondaryWall = current.thermalWalls[1]
+      primaryThermalFace.visible = showSelectedThermalFaces && Boolean(primaryWall)
+      secondaryThermalFace.visible = showSelectedThermalFaces && current.thermalBathMode === 'two' && Boolean(secondaryWall)
+      if (primaryWall) placeThermalFace(primaryThermalFace, primaryWall)
+      if (secondaryWall) placeThermalFace(secondaryThermalFace, secondaryWall)
 
       if (current.trackParticle && current.simulation.count > 0) {
         const trackedIndex = Math.max(0, Math.min(current.simulation.count - 1, current.trackedParticleIndex))
@@ -619,9 +374,7 @@ export function SimulationView(props: SimulationViewProps) {
           current.simulation.positions[positionIndex + 1] - 0.5,
           current.simulation.positions[positionIndex + 2] - 0.5,
         )
-        trackedMarker.visible = true
         trackedTrail.visible = true
-        trackedMarker.position.copy(trackedPosition)
         controls.target.lerp(viewTarget, 0.08)
 
         if (activeTrackedParticle !== trackedIndex) {
@@ -687,7 +440,6 @@ export function SimulationView(props: SimulationViewProps) {
         lastThermalContacts = thermalCount
         lastParticleCollisions = particleCount
       } else {
-        trackedMarker.visible = false
         trackedTrail.visible = false
         activeTrackedParticle = -1
         previousTrackedPosition = null
@@ -759,26 +511,23 @@ export function SimulationView(props: SimulationViewProps) {
       controls.dispose()
       geometry.dispose()
       material.dispose()
+      depthMaterial.dispose()
       ;(box.geometry as THREE.BufferGeometry).dispose()
       ;(box.material as THREE.Material).dispose()
       ;(innerBox.geometry as THREE.BufferGeometry).dispose()
       ;(innerBox.material as THREE.Material).dispose()
-      ;(thermalFace.geometry as THREE.BufferGeometry).dispose()
-      ;(thermalFace.material as THREE.Material).dispose()
-      ;(trackedMarker.geometry as THREE.BufferGeometry).dispose()
-      ;(trackedMarker.material as THREE.Material).dispose()
+      ;(primaryThermalFace.geometry as THREE.BufferGeometry).dispose()
+      ;(primaryThermalFace.material as THREE.Material).dispose()
+      ;(secondaryThermalFace.geometry as THREE.BufferGeometry).dispose()
+      ;(secondaryThermalFace.material as THREE.Material).dispose()
       trailGeometry.dispose()
       trailMaterial.dispose()
       disposeReferenceGrid(coarseGrid)
       disposeReferenceGrid(fineGrid)
-      disposeComparisonModels(comparisonRoot)
       renderer.dispose()
       renderer.domElement.remove()
     }
   }, [props.simulation])
-
-  const selectedComparison = getScaleComparison(props.scaleComparison)
-  const comparisonRatio = selectedComparison ? selectedComparison.sizeMeters / props.simulation.boxLengthMeters : 0
 
   return (
     <div className="simulation-shell">
@@ -794,16 +543,14 @@ export function SimulationView(props: SimulationViewProps) {
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
       <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · marker diameter to scale</div>
-      {selectedComparison && (
-        <div className="scale-comparison-badge">
-          <span>REAL-WORLD COMPARISON</span>
-          <b>{selectedComparison.label}</b>
-          <small>{selectedComparison.sizeLabel} {selectedComparison.measurement} · {formatScaleRatio(comparisonRatio)} box</small>
-          <i>1:1 physical scale · auto-framed</i>
+      {props.thermostatEnabled && props.thermalBathMode !== 'all' && (
+        <div className="face-contact-badge">
+          {props.thermalWalls.map((wall, index) => (
+            <span key={`${wall.axis}-${wall.positive}`} className={index === 1 ? 'secondary' : ''}>
+              <i /> {thermalFaceLabel(wall)} · {wall.temperature.toLocaleString()} K
+            </span>
+          ))}
         </div>
-      )}
-      {props.thermostatEnabled && props.singleFaceBath && (
-        <div className="face-contact-badge"><i /> +X THERMAL CONTACT</div>
       )}
       {props.trackParticle && (
         <div className="track-panel">

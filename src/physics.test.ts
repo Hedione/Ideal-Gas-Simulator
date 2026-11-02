@@ -385,6 +385,43 @@ describe('dynamics', () => {
     expect(simulation.isValid()).toBe(true)
   })
 
+  it('supports an arbitrary selected thermal face', () => {
+    const simulation = new GasSimulation(1, 300, 39.948, seededRandom(71))
+    simulation.positions.set([0.99, 0.5, 0.5])
+    simulation.velocities.set([100, 0, 0])
+    simulation.speeds[0] = 100
+    const negativeYWall = [{ axis: 1 as const, positive: false, temperature: 1000 }]
+
+    simulation.advance(2e-10, 1e20, negativeYWall)
+    expect(simulation.speeds[0]).toBeCloseTo(100, 6)
+    expect(simulation.thermalAccommodationCounts[0]).toBe(0)
+
+    simulation.positions.set([0.5, 0.001, 0.5])
+    simulation.velocities.set([0, -100, 0])
+    simulation.speeds[0] = 100
+    simulation.advance(2e-11, 1e20, negativeYWall)
+    expect(simulation.velocities[1]).toBeGreaterThanOrEqual(0)
+    expect(simulation.speeds[0]).not.toBeCloseTo(100, 2)
+    expect(simulation.thermalAccommodationCounts[0]).toBe(1)
+  })
+
+  it('uses the independently configured temperature of a second thermal face', () => {
+    const cold = new GasSimulation(1, 300, 39.948, seededRandom(72))
+    const hot = new GasSimulation(1, 300, 39.948, seededRandom(72))
+    for (const simulation of [cold, hot]) {
+      simulation.positions.set([0.5, 0.001, 0.5])
+      simulation.velocities.set([0, -100, 0])
+      simulation.speeds[0] = 100
+    }
+    const primary = { axis: 0 as const, positive: true, temperature: 100 }
+    cold.advance(2e-11, 1e20, [primary, { axis: 1, positive: false, temperature: 100 }])
+    hot.advance(2e-11, 1e20, [primary, { axis: 1, positive: false, temperature: 1600 }])
+
+    expect(hot.speeds[0] / cold.speeds[0]).toBeCloseTo(4, 5)
+    expect(hot.velocities[1]).toBeGreaterThanOrEqual(0)
+    expect(cold.velocities[1]).toBeGreaterThanOrEqual(0)
+  })
+
   it('a single thermal wall preserves an equilibrium temperature without cooling bias', () => {
     const targetTemperature = 500
     const simulation = new GasSimulation(20_000, targetTemperature, 39.948, seededRandom(8))

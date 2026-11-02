@@ -190,7 +190,7 @@ The target temperature belongs to an idealized external reservoir. Thermostat ev
 
 ### 7.1 Six-face thermal reservoir
 
-With **Thermal bath** on and the +X restriction off, all six box faces are diffuse thermal reservoirs. Particles retain their velocities during interior free flight. A random thermal perturbation is possible only after a detected wall crossing.
+With **Thermal bath** on and **All Faces** selected, all six box faces are diffuse thermal reservoirs. Particles retain their velocities during interior free flight. A random thermal perturbation is possible only after a detected wall crossing.
 
 The selected wall-coupling rate becomes a per-contact accommodation probability using a one-nanosecond reference interval:
 
@@ -208,11 +208,13 @@ P_{\mathrm{accommodate}}=1-\exp(-\nu\times1\ \mathrm{ns}\times N_{\mathrm{contac
 
 Bath-enabled motion is internally substepped according to thermal speed and box size to make multiple-contact approximations uncommon during ordinary operation.
 
-### 7.2 +X-only thermal reservoir
+### 7.2 Selected-face thermal reservoirs
 
-With **Restrict bath to +X** on, only crossings of the +X wall are eligible for thermal accommodation. The active wall is shown as a faint amber plane. The other five walls remain perfectly specular.
+**One Face** mode makes any selected wall from ±X, ±Y, or ±Z eligible for thermal accommodation. The active wall is shown as a faint amber plane, while the other five walls remain perfectly specular.
 
-The same per-contact accommodation probability is used. An accommodated particle's x velocity points into the box, while its y and z components are equilibrium Gaussian samples.
+**Two Faces** mode adds a second distinct selected wall. Its temperature initially tracks the main reservoir temperature, but matching can be disabled to create reservoirs at different temperatures. The second wall is shown with a violet overlay. With DSMC enabled, unequal wall temperatures can drive a nonequilibrium energy flow through the gas.
+
+The same per-contact accommodation probability is used for each eligible face. An accommodated particle's normal velocity always points into the box, while its two tangential components are equilibrium Gaussian samples at that wall's temperature.
 
 ### 7.3 Flux-weighted thermal-wall sampling
 
@@ -233,7 +235,7 @@ v_n=\sigma\sqrt{-2\ln U},
 \qquad U\sim\mathrm{Uniform}(0,1).
 \]
 
-For the +X wall, the code assigns \(v_x=-v_n\), so the particle moves back into the box. Tangential components remain
+For a positive face, the normal component is assigned \(-v_n\); for a negative face, it is assigned \(+v_n\). The particle therefore always moves back into the box. Tangential components remain
 
 \[
 v_y,v_z\sim\mathcal N(0,\sigma^2).
@@ -261,9 +263,9 @@ The ideal reservoir receives the opposite energy and momentum. These exchanges a
 
 ## 8. Changing temperature
 
-Changing the temperature changes the reservoir target without redrawing the current velocities. Later accommodated wall contacts gradually replace velocities with samples associated with the new target. This preserves a physically meaningful nonequilibrium relaxation process.
+Changing the main temperature changes the all-face reservoir target and the first selected-face target without redrawing the current velocities. A matched second wall follows it; an independently controlled second wall retains its own target. Later accommodated wall contacts gradually replace velocities with samples associated with the wall they struck. This preserves a physically meaningful nonequilibrium relaxation process.
 
-Relaxation is caused by explicit reservoir coupling, not by particle–particle equilibration. It is mediated by contacts with all six walls by default and is slower when restricted to the +X face. No bath perturbation occurs in the interior.
+Relaxation is caused by explicit reservoir coupling, not by particle–particle equilibration. It is mediated by contacts with all six walls by default and is slower when only one or two faces are active. No bath perturbation occurs in the interior.
 
 ## 9. Kinetic temperature and equipartition
 
@@ -310,10 +312,10 @@ Micrometer-scale molecular motion occurs over nanoseconds. The renderer maps wal
 
 \[
 \Delta t_{\mathrm{physical}}
-=\Delta t_{\mathrm{wall}}(20\ \mathrm{ns/s})s,
+=\Delta t_{\mathrm{wall}}(0.1\ \mathrm{ns/s})s,
 \]
 
-where \(s\) is the time-scale control. At the default \(s=0.01\), one wall-clock second advances about \(0.2\ \mathrm{ns}\) of physical time. This affects playback rate, not the physical equations or equilibrium distribution.
+where \(s\) is the time-scale control. At the default \(s=1\), one wall-clock second advances about \(0.1\ \mathrm{ns}\), or \(100\ \mathrm{ps}\), of physical time. This affects playback rate, not the physical equations or equilibrium distribution.
 
 Wall-frame intervals are capped at 0.05 seconds so a suspended browser tab cannot cause an unexpectedly huge update. The reflection algorithm still supports multiple crossings in one update.
 
@@ -357,7 +359,7 @@ It does not model:
 - deformable walls or wall inertia;
 - direct pressure, heat-flux, or momentum-flux accumulation.
 
-In collisionless mode, one-face heating does not establish a conventional local thermodynamic temperature field because particles do not redistribute energy through molecular encounters. With DSMC enabled, binary collisions provide a statistical transport mechanism, so one-face heating can produce collisional relaxation and spatial energy transport within the resolution limits of the collision grid.
+In collisionless mode, selected-face heating does not establish a conventional local thermodynamic temperature field because particles do not redistribute energy through molecular encounters. With DSMC enabled, binary collisions provide a statistical transport mechanism, so one- or two-face heating can produce collisional relaxation and spatial energy transport within the resolution limits of the collision grid.
 
 ## 14. Validation
 
@@ -370,7 +372,7 @@ Automated tests verify:
 - temperature and mass scaling;
 - kinetic-energy conservation under elastic reflection;
 - six-face thermal-wall relaxation and absence of interior bath events;
-- single-face contact eligibility and inward emission;
+- arbitrary selected-face contact eligibility, per-face temperatures, and inward emission;
 - absence of thermal-wall cooling bias;
 - DSMC pair momentum and kinetic-energy conservation;
 - DSMC isotropization of a two-stream nonequilibrium ensemble;
