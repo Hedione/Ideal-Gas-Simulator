@@ -178,6 +178,15 @@ function App() {
     setStats(simulation.statistics())
   }
 
+  const toggleThermalBath = () => {
+    if (thermostatEnabled) {
+      setThermostatEnabled(false)
+      setSingleFaceBath(false)
+    } else {
+      setThermostatEnabled(true)
+    }
+  }
+
   const setUniformMeanSpeed = () => {
     simulation.setUniformMeanSpeed()
     setStats(simulation.statistics())
@@ -410,9 +419,26 @@ function App() {
           </div>
           <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
           <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
-          <div className="temperature-toggles">
-            <Toggle label="Thermal bath" checked={thermostatEnabled} onChange={setThermostatEnabled} />
-            <Toggle label="Restrict to +X" checked={singleFaceBath} onChange={setSingleFaceBath} />
+          <div className="bath-mode-buttons" role="group" aria-label="Thermal wall mode">
+            <button
+              type="button"
+              className={`bath-mode-button thermal ${thermostatEnabled ? 'active' : ''}`}
+              aria-pressed={thermostatEnabled}
+              onClick={toggleThermalBath}
+            >
+              <b>THERMAL BATH</b>
+              <span>all six faces</span>
+            </button>
+            <button
+              type="button"
+              className={`bath-mode-button single-face ${singleFaceBath ? 'active' : ''}`}
+              aria-pressed={singleFaceBath}
+              disabled={!thermostatEnabled}
+              onClick={() => setSingleFaceBath((value) => !value)}
+            >
+              <b>RESTRICT +X</b>
+              <span>one thermal face</span>
+            </button>
           </div>
           <label className={`bath-rate ${thermostatEnabled ? '' : 'disabled'}`}>
             <span>WALL COUPLING <b>{thermostatRateNs.toFixed(2)} ns⁻¹</b></span>
