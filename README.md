@@ -44,10 +44,10 @@ npm run build
 
 ## Physical model
 
-- The box has a user-selectable physical side length from 0.10–1.00 μm. Display coordinates are normalized to `[0, 1]`, while wall transit, collision cells, density, pressure, mean free path, velocities, and elapsed time remain in SI units.
+- The box has a logarithmically controlled physical side length from 0.01–1.00 μm, with 0.10 μm at startup. Display coordinates are normalized to `[0, 1]`, while wall transit, collision cells, density, pressure, mean free path, velocities, and elapsed time remain in SI units.
 - Each velocity component is independently sampled from `Normal(0, k_B T / m)`. Scalar speeds therefore follow the three-dimensional Maxwell–Boltzmann law.
 - Collisionless mode uses noninteracting points. Optional hard-sphere DSMC mode performs stochastic, spatially local binary collisions that conserve pair momentum and kinetic energy. Wall collisions are perfectly elastic, and a triangle-wave coordinate fold handles any number of wall crossings in one update.
-- At 1×, the visual clock advances 20 ns of physical time per wall-clock second; the current 0.01× default advances about 0.2 ns per second. This is a visualization scale, not a modification of the mechanics.
+- At the 1× default, the visual clock advances about 0.2 ns of physical time per wall-clock second. The displayed scale was multiplied by 100 while the base timestep was divided by 100, so this relabeling does not change the prior visual or physical rate.
 - The measured kinetic temperature is calculated from the actual ensemble using `T = m ⟨v²⟩ / (3 k_B)`. Finite samples fluctuate statistically around the target.
 - The histogram uses every simulated particle, is normalized by `N × bin width`, and updates independently from rendering.
 
@@ -66,14 +66,15 @@ When the bath and DSMC are disabled, wall reflections only reverse velocity comp
 ## Controls
 
 - Temperature from 5–5,000 K with wall-mediated thermal relaxation
-- Helium, neon, argon, nitrogen (N₂), xenon, and a Custom option that reveals the particle-mass input
-- 100–50,000 simulated/rendered particles using a continuous count slider, with 10,000 at startup. Decreasing the count removes a uniformly random subset without resetting surviving particles; increasing it preserves the existing ensemble and adds uniformly positioned particles with Maxwell–Boltzmann velocities at the current target temperature.
-- Play/pause, reset, a logarithmic 0.001×–3× physical time scale (0.01× default), a 0.10–1.00 μm box-side slider, wall-coupling rate, and histogram bin count beside the chart (100 bins by default)
+- Helium, neon, argon, nitrogen (N₂), xenon, and a Custom option with a draftable particle-mass input that commits on Enter or blur
+- 100–50,000 simulated/rendered particles using a continuous count slider, with 25,000 at startup. Decreasing the count removes a uniformly random subset without resetting surviving particles; increasing it preserves the existing ensemble and adds uniformly positioned particles with Maxwell–Boltzmann velocities at the current target temperature.
+- Play/pause, a quick ensemble reset at current settings, and a header-level RESET SIMULATION button that restores every startup option without reloading the page; plus a logarithmic 0.1×–100× physical time scale (1× default), a logarithmic 0.01–1.00 μm box-side slider (0.10 μm default), wall-coupling rate, and histogram bin count beside the chart (100 bins by default)
 - Nonequilibrium presets that set every particle to the theoretical mean speed or align all velocity vectors with the x, y, or z axis while preserving their signs and kinetic energy; each preset restarts the experiment clock and collision counters
-- Permanently enabled speed coloring, analytical curve, characteristic-speed markers, and a reference grid that expands as the selected physical box shrinks
+- Permanently enabled speed coloring, analytical curve, characteristic-speed markers, and a reference grid that cross-fades between power-of-two refinement levels. Each refinement doubles the divisions on both axes, splitting every square into four, while center axes use the same subdued color as other grid lines.
 - Large side-by-side thermal-wall mode buttons: the six-face bath starts enabled, while the +X-only mode is available only when the bath is on and highlights the active thermal face
-- Spatial hard-sphere DSMC collisions enabled by default, with a large highlighted ON/OFF button and live status directly below box size in the Simulation module; species collision-diameter presets, a 0.1–20 Å collision-diameter slider, adaptive collision cells, and live mean-free-path/Knudsen diagnostics remain available
-- An independent 0.25×–2.5× nominal marker-size slider with automatic population-density and box-length compensation; collision diameter no longer changes rendered marker size
+- Spatial hard-sphere DSMC collisions enabled by default, with a large highlighted ON/OFF button below box size in the Simulation module; species collision-diameter presets, a 0.1–20 Å collision-diameter slider, adaptive collision cells, and live mean-free-path/Knudsen diagnostics remain available
+- Particle marker diameter, edge fuzziness, and opacity controls. Diameter is expressed in ångströms with automatic population-density and box-length compensation; its default-on match mode keeps the visual diameter synchronized with the collision diameter.
+- Selectable real-world scale comparisons render schematic red blood cell, E. coli, platelet, coronavirus, ATP synthase, DNA, carbon nanotube, and C₆₀ buckyball models beside the gas box. The readout reports the exact physical object-to-box ratio, while an explicitly labeled adaptive display scale keeps both objects visible across the four-order-of-magnitude range.
 - Independent hot-, cold-, and speed-band focus modes, plus random single-particle tracking. The hot cutoff defaults to 750 m/s. The cold slider spans 0–500 m/s and the hot slider spans 0–5,000 m/s, while direct positive numeric entry may exceed either slider range. Top 1% and Bottom 1% buttons calculate the corresponding Maxwell–Boltzmann speed quantiles from the current temperature and particle mass. Speed-band focus selects particles within an adjustable center ± half-width window. A shared opacity control adjusts all nonfocused particles, matching highlights appear in physical and momentum space, and matching dashed cutoff markers appear on the speed-distribution chart.
 - Double-click reset for every slider, plus a temperature field that accepts an empty draft and commits only on Enter or blur
 - A freely rotatable 3D momentum-space panel that starts enabled and has a large ON/OFF control for reducing GPU load when needed. It sits between the equally tall physical-space and speed-distribution panels. The physical-space panel receives the largest width allocation, while the distribution panel uses a compact 3×3 observable grid. Momentum space contains every particle, is normalized to a ±5 thermal-momentum-standard-deviation cube, and refreshes at a reduced data cadence for performance.
@@ -82,6 +83,10 @@ When the bath and DSMC are disabled, wall reflections only reverse velocity comp
 - Mouse orbit, zoom, and pan in the 3D view
 
 Particle markers are intentionally enlarged, user-adjustable, and are not to scale.
+
+### Scale-comparison references
+
+Representative dimensions and shapes use the [NIST/DOE Scale of Things chart](https://www.nist.gov/document/doescaleofthingschartpdf), [NCBI red-cell and platelet dimensions](https://pmc.ncbi.nlm.nih.gov/articles/PMC6687464/), [NCBI E. coli dimensions](https://www.ncbi.nlm.nih.gov/books/NBK224756/), [SARS-CoV-2 morphometry](https://pubmed.ncbi.nlm.nih.gov/33568700/), and the [NHGRI DNA double-helix description](https://www.genome.gov/about-genomics/fact-sheets/Deoxyribonucleic-Acid-Fact-Sheet). Renderings are original schematic Three.js geometry rather than copied source artwork.
 
 ## Tests
 

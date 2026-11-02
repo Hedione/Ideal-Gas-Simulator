@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DistributionChart } from './components/DistributionChart'
 import { MomentumSpaceView } from './components/MomentumSpaceView'
 import { SimulationView } from './components/SimulationView'
+import { SCALE_COMPARISONS, ScaleComparisonId } from './scaleComparisons'
 import {
   BOLTZMANN,
   COLLISION_DIAMETERS_ANGSTROM,
@@ -34,18 +35,23 @@ function App() {
   const [temperature, setTemperature] = useState(300)
   const [temperatureDraft, setTemperatureDraft] = useState('300')
   const [massAmu, setMassAmu] = useState<number>(GAS_SPECIES.Argon)
+  const [customMassDraft, setCustomMassDraft] = useState(String(GAS_SPECIES.Argon))
   const [species, setSpecies] = useState<SpeciesSelection>('Argon')
-  const [particleCount, setParticleCount] = useState(10_000)
-  const [simulation, setSimulation] = useState(() => new GasSimulation(10_000, 300, GAS_SPECIES.Argon))
+  const [particleCount, setParticleCount] = useState(25_000)
+  const [simulation, setSimulation] = useState(() => new GasSimulation(25_000, 300, GAS_SPECIES.Argon, Math.random, 0.1e-6))
   const [playing, setPlaying] = useState(true)
-  const [speedMultiplier, setSpeedMultiplier] = useState(0.01)
-  const [boxLengthMicrometers, setBoxLengthMicrometers] = useState(1)
+  const [speedMultiplier, setSpeedMultiplier] = useState(1)
+  const [boxLengthMicrometers, setBoxLengthMicrometers] = useState(0.1)
   const [thermostatEnabled, setThermostatEnabled] = useState(true)
   const [thermostatRateNs, setThermostatRateNs] = useState(0.2)
   const [singleFaceBath, setSingleFaceBath] = useState(false)
   const [dsmcEnabled, setDsmcEnabled] = useState(true)
   const [collisionDiameterAngstrom, setCollisionDiameterAngstrom] = useState(COLLISION_DIAMETERS_ANGSTROM.Argon)
-  const [particleMarkerSize, setParticleMarkerSize] = useState(1)
+  const [particleMarkerDiameterAngstrom, setParticleMarkerDiameterAngstrom] = useState(COLLISION_DIAMETERS_ANGSTROM.Argon)
+  const [matchMarkerToCollisionDiameter, setMatchMarkerToCollisionDiameter] = useState(true)
+  const [particleFuzziness, setParticleFuzziness] = useState(0.35)
+  const [particleOpacity, setParticleOpacity] = useState(1)
+  const [scaleComparison, setScaleComparison] = useState<ScaleComparisonId>('none')
   const [bins, setBins] = useState(100)
   const [highlightFast, setHighlightFast] = useState(false)
   const [speedThreshold, setSpeedThreshold] = useState(750)
@@ -168,7 +174,7 @@ function App() {
   }
 
   const applyBoxLength = useCallback((nextMicrometers: number) => {
-    const micrometers = Math.max(0.1, Math.min(1, Number.isFinite(nextMicrometers) ? nextMicrometers : 1))
+    const micrometers = Math.max(0.01, Math.min(1, Number.isFinite(nextMicrometers) ? nextMicrometers : 0.1))
     setBoxLengthMicrometers(micrometers)
     simulation.setBoxLength(micrometers * 1e-6)
     setStats(simulation.statistics())
@@ -192,21 +198,96 @@ function App() {
     setSpecies(next)
     if (next !== 'Custom') {
       const mass = GAS_SPECIES[next]
+      const diameter = COLLISION_DIAMETERS_ANGSTROM[next]
       setMassAmu(mass)
-      setCollisionDiameterAngstrom(COLLISION_DIAMETERS_ANGSTROM[next])
+      setCustomMassDraft(String(mass))
+      setCollisionDiameterAngstrom(diameter)
+      if (matchMarkerToCollisionDiameter) setParticleMarkerDiameterAngstrom(diameter)
       rebuildSimulation(particleCount, temperature, mass)
     }
+  }
+
+  const applyCollisionDiameter = (next: number) => {
+    setCollisionDiameterAngstrom(next)
+    if (matchMarkerToCollisionDiameter) setParticleMarkerDiameterAngstrom(next)
+  }
+
+  const applyParticleMarkerDiameter = (next: number) => {
+    setParticleMarkerDiameterAngstrom(next)
+    setMatchMarkerToCollisionDiameter(false)
+  }
+
+  const toggleMarkerCollisionMatch = () => {
+    setParticleMarkerDiameterAngstrom(collisionDiameterAngstrom)
+    setMatchMarkerToCollisionDiameter((value) => !value)
   }
 
   const applyCustomMass = (next: number) => {
     const mass = Math.max(0.1, Math.min(300, Number.isFinite(next) ? next : massAmu))
     setMassAmu(mass)
+    setCustomMassDraft(String(mass))
     simulation.setMass(mass, true)
+  }
+
+  const commitCustomMassDraft = () => {
+    if (customMassDraft.trim() === '') {
+      setCustomMassDraft(String(massAmu))
+      return
+    }
+    const parsed = Number(customMassDraft)
+    if (!Number.isFinite(parsed)) {
+      setCustomMassDraft(String(massAmu))
+      return
+    }
+    applyCustomMass(parsed)
   }
 
   const reset = () => {
     simulation.reset(temperature)
     setStats(simulation.statistics())
+  }
+
+  const resetSimulationOptions = () => {
+    const nextSimulation = new GasSimulation(25_000, 300, GAS_SPECIES.Argon, Math.random, 0.1e-6)
+    setTemperature(300)
+    setTemperatureDraft('300')
+    setMassAmu(GAS_SPECIES.Argon)
+    setCustomMassDraft(String(GAS_SPECIES.Argon))
+    setSpecies('Argon')
+    setParticleCount(25_000)
+    setSimulation(nextSimulation)
+    setPlaying(true)
+    setSpeedMultiplier(1)
+    setBoxLengthMicrometers(0.1)
+    setThermostatEnabled(true)
+    setThermostatRateNs(0.2)
+    setSingleFaceBath(false)
+    setDsmcEnabled(true)
+    setCollisionDiameterAngstrom(COLLISION_DIAMETERS_ANGSTROM.Argon)
+    setParticleMarkerDiameterAngstrom(COLLISION_DIAMETERS_ANGSTROM.Argon)
+    setMatchMarkerToCollisionDiameter(true)
+    setParticleFuzziness(0.35)
+    setParticleOpacity(1)
+    setScaleComparison('none')
+    setBins(100)
+    setHighlightFast(false)
+    setSpeedThreshold(750)
+    setSpeedThresholdDraft('750')
+    setHighlightedCount(0)
+    setHighlightCold(false)
+    setColdSpeedThreshold(100)
+    setColdSpeedThresholdDraft('100')
+    setColdHighlightedCount(0)
+    setHighlightBand(false)
+    setBandCenter(400)
+    setBandHalfWidth(10)
+    setBandHighlightedCount(0)
+    setUnfocusedOpacity(0.18)
+    setTrackParticle(false)
+    setTrackedParticleIndex(0)
+    setShowMomentumSpace(true)
+    setShowInfo(false)
+    setStats(nextSimulation.statistics())
   }
 
   const toggleThermalBath = () => {
@@ -241,12 +322,11 @@ function App() {
     return {
       meanFreePath,
       knudsenNumber: meanFreePath / boxLengthMeters,
-      gridDimension: Math.max(1, Math.min(16, Math.round(Math.cbrt(particleCount / 64)))),
     }
   }, [boxLengthMicrometers, collisionDiameterAngstrom, particleCount])
   const boxLengthMeters = boxLengthMicrometers * 1e-6
-  const numberDensityCm3 = particleCount / ((boxLengthMeters * 100) ** 3)
-  const idealGasPressure = (particleCount / (boxLengthMeters ** 3)) * BOLTZMANN * temperature
+  const numberDensityM3 = particleCount / (boxLengthMeters ** 3)
+  const idealGasPressure = numberDensityM3 * BOLTZMANN * temperature
   const focusActive = highlightFast || highlightCold || highlightBand || trackParticle
   return (
     <main className="app-shell">
@@ -259,6 +339,7 @@ function App() {
         <div className="topbar-meta">
           <span><i className="live-dot" /> LIVE MODEL</span>
           <button className="info-button" onClick={() => setShowInfo((value) => !value)} aria-expanded={showInfo}>i</button>
+          <button className="header-reset-button" type="button" onClick={resetSimulationOptions}>RESET SIMULATION</button>
         </div>
       </header>
 
@@ -280,7 +361,10 @@ function App() {
           singleFaceBath={singleFaceBath}
           dsmcEnabled={dsmcEnabled}
           collisionDiameterAngstrom={collisionDiameterAngstrom}
-          particleMarkerSize={particleMarkerSize}
+          particleMarkerDiameterAngstrom={particleMarkerDiameterAngstrom}
+          particleFuzziness={particleFuzziness}
+          particleOpacity={particleOpacity}
+          scaleComparison={scaleComparison}
           highlightFast={highlightFast}
           speedThreshold={speedThreshold}
           highlightCold={highlightCold}
@@ -368,9 +452,9 @@ function App() {
             <article><span>Mean particle speed</span><strong>{stats.meanSpeed.toFixed(1)} <small>m/s</small></strong></article>
             <article><span>Physical time elapsed</span><strong>{formatSimulationTime(stats.elapsedTime)}</strong></article>
             <article><span>Mean free path</span><strong>{dsmcEnabled ? formatLength(Number.isFinite(simulation.collisionDiagnostics.meanFreePath) ? simulation.collisionDiagnostics.meanFreePath : collisionTheory.meanFreePath) : '—'}</strong></article>
-            <article><span>Knudsen number</span><strong>{dsmcEnabled ? (Number.isFinite(simulation.collisionDiagnostics.knudsenNumber) ? simulation.collisionDiagnostics.knudsenNumber : collisionTheory.knudsenNumber).toFixed(1) : '—'}</strong></article>
+            <article><span>Knudsen number</span><strong>{dsmcEnabled ? (Number.isFinite(simulation.collisionDiagnostics.knudsenNumber) ? simulation.collisionDiagnostics.knudsenNumber : collisionTheory.knudsenNumber).toFixed(3) : '—'}</strong></article>
             <article><span>DSMC collisions</span><strong>{dsmcEnabled ? simulation.collisionDiagnostics.totalAccepted.toLocaleString() : 'OFF'}</strong></article>
-            <article><span>Collision grid</span><strong>{dsmcEnabled ? `${simulation.collisionDiagnostics.gridDimension || collisionTheory.gridDimension}³` : '—'}</strong></article>
+            <article><span>Number density</span><strong>{numberDensityM3.toExponential(3)} <small>#/m³</small></strong></article>
             <article><span>Ideal gas pressure</span><strong>{idealGasPressure < 100 ? idealGasPressure.toFixed(2) : idealGasPressure.toFixed(1)} <small>Pa</small></strong></article>
           </div>
         </section>
@@ -393,28 +477,28 @@ function App() {
             <span>TIME SCALE <b>{speedMultiplier < 0.01 ? speedMultiplier.toFixed(3) : speedMultiplier < 0.1 ? speedMultiplier.toFixed(2) : speedMultiplier.toFixed(1)}×</b></span>
             <input
               type="range"
-              min="-3"
-              max={Math.log10(3)}
+              min="-1"
+              max={Math.log10(100)}
               step="0.05"
               value={Math.log10(speedMultiplier)}
               onChange={(event) => setSpeedMultiplier(10 ** Number(event.target.value))}
-              onDoubleClick={() => setSpeedMultiplier(0.01)}
+              onDoubleClick={() => setSpeedMultiplier(1)}
               title="Double-click to reset"
             />
           </label>
           <label className="compact-slider box-size-slider">
-            <span>BOX SIDE LENGTH <b>{boxLengthMicrometers.toFixed(2)} μm</b></span>
+            <span>BOX SIDE LENGTH <b>{boxLengthMicrometers < 0.1 ? boxLengthMicrometers.toFixed(3) : boxLengthMicrometers.toFixed(2)} μm</b></span>
             <input
               type="range"
-              min="0.1"
-              max="1"
+              min="-2"
+              max="0"
               step="0.01"
-              value={boxLengthMicrometers}
-              onChange={(event) => applyBoxLength(Number(event.target.value))}
-              onDoubleClick={() => applyBoxLength(1)}
+              value={Math.log10(boxLengthMicrometers)}
+              onChange={(event) => applyBoxLength(10 ** Number(event.target.value))}
+              onDoubleClick={() => applyBoxLength(0.1)}
               title="Double-click to reset"
             />
-            <span className="slider-endpoints"><i>0.10 μm</i><i>1.00 μm</i></span>
+            <span className="slider-endpoints"><i>0.01 μm</i><i>1.00 μm</i></span>
           </label>
           <div className="simulation-dsmc">
             <button
@@ -426,13 +510,18 @@ function App() {
               <b>DSMC COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
               <span>{dsmcEnabled ? 'hard-sphere binary collisions enabled' : 'collisionless particle motion'}</span>
             </button>
-            {dsmcEnabled && (
-              <div className={`dsmc-status ${simulation.collisionDiagnostics.accuracyLimited ? 'warning' : ''}`}>
-                <span>HARD-SPHERE DSMC</span>
-                <b>{simulation.collisionDiagnostics.gridDimension || collisionTheory.gridDimension}³ cells · {simulation.collisionDiagnostics.acceptedLastAdvance} recent collisions</b>
-                {simulation.collisionDiagnostics.accuracyLimited && <small>Accuracy limit reached—reduce time scale or diameter.</small>}
-              </div>
-            )}
+            <label className="scale-comparison-control">
+              <span>REAL-WORLD SCALE COMPARISON</span>
+              <select value={scaleComparison} onChange={(event) => setScaleComparison(event.target.value as ScaleComparisonId)}>
+                <option value="none">None</option>
+                {SCALE_COMPARISONS.map((comparison) => (
+                  <option key={comparison.id} value={comparison.id}>
+                    {comparison.label} — {comparison.sizeLabel}
+                  </option>
+                ))}
+              </select>
+              <small>Shows a schematic model beside the box with its exact size ratio.</small>
+            </label>
           </div>
         </div>
 
@@ -495,31 +584,26 @@ function App() {
             <label className="mass-input">
               <span>PARTICLE MASS</span>
               <div className="input-with-unit">
-                <input type="number" min="0.1" max="300" step="0.001" value={massAmu} onChange={(event) => applyCustomMass(Number(event.target.value))} />
+                <input
+                  type="number"
+                  min="0.1"
+                  max="300"
+                  step="0.001"
+                  value={customMassDraft}
+                  onChange={(event) => setCustomMassDraft(event.target.value)}
+                  onBlur={commitCustomMassDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      setCustomMassDraft(String(massAmu))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
                 <span>u</span>
               </div>
             </label>
           )}
-          <label className="diameter-slider">
-            <span>COLLISION DIAMETER <b>{collisionDiameterAngstrom.toFixed(1)} Å</b></span>
-            <input
-              type="range"
-              min="0.1"
-              max="20"
-              step="0.1"
-              value={collisionDiameterAngstrom}
-              onChange={(event) => setCollisionDiameterAngstrom(Number(event.target.value))}
-              onDoubleClick={() => setCollisionDiameterAngstrom(species === 'Custom' ? COLLISION_DIAMETERS_ANGSTROM.Argon : COLLISION_DIAMETERS_ANGSTROM[species])}
-              title="Double-click to reset"
-            />
-            <span className="slider-endpoints"><i>0.1 Å</i><i>20 Å</i></span>
-          </label>
-          <label className="diameter-slider marker-size-slider">
-            <span>PARTICLE MARKER SIZE <b>{particleMarkerSize.toFixed(2)}×</b></span>
-            <input type="range" min="0.25" max="2.5" step="0.05" value={particleMarkerSize} onChange={(event) => setParticleMarkerSize(Number(event.target.value))} onDoubleClick={() => setParticleMarkerSize(1)} title="Double-click to reset" />
-            <span className="slider-endpoints"><i>small</i><i>large</i></span>
-          </label>
-          <small className="physical-scale-note">Visual marker size is independent of collision diameter.</small>
           <label className="population-slider">
             <span>PARTICLE COUNT <b>{particleCount.toLocaleString()}</b></span>
             <input
@@ -529,15 +613,82 @@ function App() {
               step="100"
               value={particleCount}
               onChange={(event) => resizeParticlePopulation(Number(event.target.value))}
-              onDoubleClick={() => resizeParticlePopulation(10_000)}
+              onDoubleClick={() => resizeParticlePopulation(25_000)}
               title="Double-click to reset"
             />
             <span className="slider-endpoints"><i>100</i><i>50,000</i></span>
           </label>
-          <div className="population-metrics">
-            <div><span>NUMBER DENSITY</span><b>{numberDensityCm3.toExponential(2)}</b><small>particles/cm³</small></div>
-            <div><span>IDEAL PRESSURE</span><b>{idealGasPressure < 100 ? idealGasPressure.toFixed(2) : idealGasPressure.toFixed(1)}</b><small>Pa</small></div>
+          <label className="diameter-slider">
+            <span>COLLISION DIAMETER <b>{collisionDiameterAngstrom.toFixed(1)} Å</b></span>
+            <input
+              type="range"
+              min="0.1"
+              max="20"
+              step="0.1"
+              value={collisionDiameterAngstrom}
+              onChange={(event) => applyCollisionDiameter(Number(event.target.value))}
+              onDoubleClick={() => applyCollisionDiameter(species === 'Custom' ? COLLISION_DIAMETERS_ANGSTROM.Argon : COLLISION_DIAMETERS_ANGSTROM[species])}
+              title="Double-click to reset"
+            />
+            <span className="slider-endpoints"><i>0.1 Å</i><i>20 Å</i></span>
+          </label>
+          <div className="diameter-slider marker-diameter-control">
+            <span>PARTICLE MARKER DIAMETER <b>{particleMarkerDiameterAngstrom.toFixed(1)} Å</b></span>
+            <div className="marker-diameter-row">
+              <div className="marker-diameter-slider">
+                <input
+                  aria-label="Particle marker diameter"
+                  type="range"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  value={particleMarkerDiameterAngstrom}
+                  onChange={(event) => applyParticleMarkerDiameter(Number(event.target.value))}
+                  onDoubleClick={() => {
+                    setParticleMarkerDiameterAngstrom(collisionDiameterAngstrom)
+                    setMatchMarkerToCollisionDiameter(true)
+                  }}
+                  title="Double-click to match collision diameter"
+                />
+                <span className="slider-endpoints"><i>0.1 Å</i><i>20 Å</i></span>
+              </div>
+              <button
+                type="button"
+                className={`marker-match-button ${matchMarkerToCollisionDiameter ? 'active' : ''}`}
+                aria-pressed={matchMarkerToCollisionDiameter}
+                onClick={toggleMarkerCollisionMatch}
+              >
+                MATCH COLLISION<br />DIAMETER
+              </button>
+            </div>
           </div>
+          <small className="physical-scale-note">Visual diameter only; automatic visibility scaling still applies.</small>
+          <label className="particle-appearance-slider">
+            <span>PARTICLE FUZZINESS <b>{Math.round(particleFuzziness * 100)}%</b></span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={particleFuzziness}
+              onChange={(event) => setParticleFuzziness(Number(event.target.value))}
+              onDoubleClick={() => setParticleFuzziness(0.35)}
+              title="Double-click to reset"
+            />
+          </label>
+          <label className="particle-appearance-slider">
+            <span>PARTICLE OPACITY <b>{Math.round(particleOpacity * 100)}%</b></span>
+            <input
+              type="range"
+              min="0.05"
+              max="1"
+              step="0.01"
+              value={particleOpacity}
+              onChange={(event) => setParticleOpacity(Number(event.target.value))}
+              onDoubleClick={() => setParticleOpacity(1)}
+              title="Double-click to reset"
+            />
+          </label>
         </div>
 
         <div className="control-block focus-block">

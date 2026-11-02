@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { GasSimulation, thermalSigma } from '../physics'
+import { COLLISION_DIAMETERS_ANGSTROM, GasSimulation, thermalSigma } from '../physics'
+import { formatScaleRatio, getScaleComparison, SCALE_COMPARISONS, ScaleComparisonId, ScaleComparisonShape } from '../scaleComparisons'
 
 interface SimulationViewProps {
   simulation: GasSimulation
@@ -12,7 +13,10 @@ interface SimulationViewProps {
   singleFaceBath: boolean
   dsmcEnabled: boolean
   collisionDiameterAngstrom: number
-  particleMarkerSize: number
+  particleMarkerDiameterAngstrom: number
+  particleFuzziness: number
+  particleOpacity: number
+  scaleComparison: ScaleComparisonId
   highlightFast: boolean
   speedThreshold: number
   highlightCold: boolean
@@ -45,12 +49,16 @@ const fragmentShader = `
   varying vec3 vColor;
   varying float vHighlight;
   uniform float unfocusedOpacity;
+  uniform float particleFuzziness;
+  uniform float particleOpacity;
   void main() {
     vec2 centered = gl_PointCoord - vec2(0.5);
     float radius = length(centered);
     if (radius > 0.5) discard;
+    float edgeSoftness = mix(0.005, 0.24, particleFuzziness);
+    float edgeAlpha = 1.0 - smoothstep(0.5 - edgeSoftness, 0.5, radius);
     float glow = smoothstep(0.5, 0.05, radius);
-    float alpha = mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow);
+    float alpha = particleOpacity * mix(unfocusedOpacity, 1.0, vHighlight) * (0.42 + 0.58 * glow) * edgeAlpha;
     gl_FragColor = vec4(vColor * (0.72 + 0.55 * glow), alpha);
   }
 `
@@ -73,6 +81,202 @@ function writeThermalColor(target: Float32Array, offset: number, normalized: num
   target[offset + 2] = a[2] + (b[2] - a[2]) * mix
 }
 
+function comparisonMaterial(color: number, opacity = 0.82): THREE.MeshPhongMaterial {
+  return new THREE.MeshPhongMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.14,
+    shininess: 52,
+    transparent: true,
+    opacity,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+}
+
+function cylinderBetween(
+  start: THREE.Vector3,
+  end: THREE.Vector3,
+  radius: number,
+  material: THREE.Material,
+  radialSegments = 8,
+): THREE.Mesh {
+  const direction = end.clone().sub(start)
+  const cylinder = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, direction.length(), radialSegments),
+    material,
+  )
+  cylinder.position.copy(start).add(end).multiplyScalar(0.5)
+  cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize())
+  return cylinder
+}
+
+function createRedBloodCell(): THREE.Group {
+  const group = new THREE.Group()
+  const profile: THREE.Vector2[] = []
+  const segments = 18
+  for (let i = 0; i <= segments; i += 1) {
+    const radius = 0.5 * i / segments
+    const thickness = 0.045 + 0.13 * Math.sin(Math.PI * i / segments) ** 0.72
+    profile.push(new THREE.Vector2(radius, thickness))
+  }
+  for (let i = segments; i >= 0; i -= 1) {
+    const radius = 0.5 * i / segments
+    const thickness = 0.045 + 0.13 * Math.sin(Math.PI * i / segments) ** 0.72
+    profile.push(new THREE.Vector2(radius, -thickness))
+  }
+  const cell = new THREE.Mesh(new THREE.LatheGeometry(profile, 52), comparisonMaterial(0xd84655, 0.78))
+  cell.rotation.z = -0.18
+  group.add(cell)
+  return group
+}
+
+function createBacterium(): THREE.Group {
+  const group = new THREE.Group()
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.23, 0.54, 8, 20), comparisonMaterial(0x62c99a, 0.8))
+  body.rotation.z = Math.PI / 2
+  group.add(body)
+
+  const flagellumMaterial = new THREE.MeshBasicMaterial({ color: 0x86e0b8, transparent: true, opacity: 0.66 })
+  for (let strand = 0; strand < 3; strand += 1) {
+    const points: THREE.Vector3[] = []
+    for (let i = 0; i <= 18; i += 1) {
+      const progress = i / 18
+      points.push(new THREE.Vector3(
+        -0.5 - progress * 0.56,
+        0.08 * Math.sin(progress * Math.PI * 4 + strand * 2.1),
+        (strand - 1) * 0.055,
+      ))
+    }
+    group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 36, 0.009, 5, false), flagellumMaterial))
+  }
+  return group
+}
+
+function createCoronavirus(): THREE.Group {
+  const group = new THREE.Group()
+  group.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 3), comparisonMaterial(0xc99d49, 0.7)))
+  const stemMaterial = comparisonMaterial(0xe4bb66, 0.85)
+  const tipMaterial = comparisonMaterial(0xf0cd82, 0.9)
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+  for (let i = 0; i < 26; i += 1) {
+    const y = 1 - (i / 25) * 2
+    const radial = Math.sqrt(Math.max(0, 1 - y * y))
+    const angle = goldenAngle * i
+    const direction = new THREE.Vector3(Math.cos(angle) * radial, y, Math.sin(angle) * radial)
+    const stemStart = direction.clone().multiplyScalar(0.33)
+    const stemEnd = direction.clone().multiplyScalar(0.48)
+    group.add(cylinderBetween(stemStart, stemEnd, 0.014, stemMaterial, 6))
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 6), tipMaterial)
+    tip.position.copy(direction).multiplyScalar(0.52)
+    group.add(tip)
+  }
+  return group
+}
+
+function createDna(): THREE.Group {
+  const group = new THREE.Group()
+  const strandMaterials = [comparisonMaterial(0x57c8f2, 0.9), comparisonMaterial(0xff799c, 0.9)]
+  const strandPoints: THREE.Vector3[][] = [[], []]
+  for (let strand = 0; strand < 2; strand += 1) {
+    for (let i = 0; i <= 64; i += 1) {
+      const progress = i / 64
+      const angle = progress * Math.PI * 4 + strand * Math.PI
+      strandPoints[strand].push(new THREE.Vector3(0.5 * Math.cos(angle), (progress - 0.5) * 1.38, 0.5 * Math.sin(angle)))
+    }
+    group.add(new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(strandPoints[strand]), 96, 0.035, 7, false),
+      strandMaterials[strand],
+    ))
+  }
+  const rungMaterial = comparisonMaterial(0xd7e7df, 0.56)
+  for (let i = 4; i < 64; i += 6) {
+    group.add(cylinderBetween(strandPoints[0][i], strandPoints[1][i], 0.017, rungMaterial, 6))
+  }
+  group.rotation.z = -0.14
+  return group
+}
+
+function createBuckyball(): THREE.Group {
+  const group = new THREE.Group()
+  const geometry = new THREE.IcosahedronGeometry(0.5, 2)
+  group.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x82cbd5, transparent: true, opacity: 0.06, depthWrite: false })))
+  group.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(geometry, 12),
+    new THREE.LineBasicMaterial({ color: 0xa5e2e8, transparent: true, opacity: 0.78 }),
+  ))
+  group.rotation.set(0.15, 0.25, 0)
+  return group
+}
+
+function createPlatelet(): THREE.Group {
+  const group = new THREE.Group()
+  const platelet = new THREE.Mesh(new THREE.SphereGeometry(0.5, 30, 18), comparisonMaterial(0xc881cf, 0.72))
+  platelet.scale.set(1, 0.22, 0.72)
+  platelet.rotation.z = 0.16
+  group.add(platelet)
+  for (let i = 0; i < 7; i += 1) {
+    const granule = new THREE.Mesh(new THREE.SphereGeometry(0.035 + (i % 3) * 0.008, 7, 5), comparisonMaterial(0xf0b3ea, 0.8))
+    const angle = i * 2.31
+    granule.position.set(Math.cos(angle) * 0.27, 0.105, Math.sin(angle) * 0.19)
+    group.add(granule)
+  }
+  return group
+}
+
+function createAtpSynthase(): THREE.Group {
+  const group = new THREE.Group()
+  const proteinMaterial = comparisonMaterial(0xe3aa51, 0.82)
+  const rotorMaterial = comparisonMaterial(0x77c5ce, 0.82)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.43, 24, 16), proteinMaterial)
+  head.scale.y = 0.72
+  head.position.y = 0.26
+  group.add(head)
+  group.add(cylinderBetween(new THREE.Vector3(0, -0.3, 0), new THREE.Vector3(0, 0.18, 0), 0.055, rotorMaterial, 10))
+  const membraneRotor = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.18, 20), proteinMaterial)
+  membraneRotor.position.y = -0.34
+  group.add(membraneRotor)
+  const membrane = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.035, 32), comparisonMaterial(0x557e91, 0.25))
+  membrane.position.y = -0.34
+  group.add(membrane)
+  return group
+}
+
+function createCarbonNanotube(): THREE.Group {
+  const group = new THREE.Group()
+  const tube = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.5, 1.45, 18, 8, true),
+    new THREE.MeshBasicMaterial({ color: 0xa7c3cc, wireframe: true, transparent: true, opacity: 0.76 }),
+  )
+  tube.rotation.z = Math.PI / 2
+  group.add(tube)
+  return group
+}
+
+function createComparisonModel(shape: ScaleComparisonShape): THREE.Group {
+  switch (shape) {
+    case 'red-blood-cell': return createRedBloodCell()
+    case 'bacterium': return createBacterium()
+    case 'coronavirus': return createCoronavirus()
+    case 'dna': return createDna()
+    case 'buckyball': return createBuckyball()
+    case 'platelet': return createPlatelet()
+    case 'atp-synthase': return createAtpSynthase()
+    case 'carbon-nanotube': return createCarbonNanotube()
+  }
+}
+
+function disposeComparisonModels(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    const renderable = child as THREE.Mesh | THREE.LineSegments
+    if (renderable.geometry) renderable.geometry.dispose()
+    if (renderable.material) {
+      const materials = Array.isArray(renderable.material) ? renderable.material : [renderable.material]
+      materials.forEach((item) => item.dispose())
+    }
+  })
+}
+
 export function SimulationView(props: SimulationViewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const trackPositionRef = useRef<HTMLSpanElement>(null)
@@ -92,6 +296,10 @@ export function SimulationView(props: SimulationViewProps) {
 
     const scene = new THREE.Scene()
     scene.fog = new THREE.FogExp2(0x050b10, 0.09)
+    scene.add(new THREE.HemisphereLight(0x9bdde5, 0x142128, 1.25))
+    const comparisonLight = new THREE.DirectionalLight(0xffffff, 1.3)
+    comparisonLight.position.set(2, 3, 2)
+    scene.add(comparisonLight)
     const camera = new THREE.PerspectiveCamera(43, 1, 0.01, 100)
     camera.position.set(1.72, 1.28, 1.82)
 
@@ -113,6 +321,8 @@ export function SimulationView(props: SimulationViewProps) {
       uniforms: {
         pointScale: { value: 2.15 * Math.min(window.devicePixelRatio, 1.75) },
         unfocusedOpacity: { value: props.unfocusedOpacity },
+        particleFuzziness: { value: props.particleFuzziness },
+        particleOpacity: { value: props.particleOpacity },
       },
       vertexShader,
       fragmentShader,
@@ -179,9 +389,68 @@ export function SimulationView(props: SimulationViewProps) {
     thermalFace.visible = false
     scene.add(thermalFace)
 
-    const grid = new THREE.GridHelper(1.5, 10, 0x174957, 0x102a34)
-    grid.position.y = -0.505
-    scene.add(grid)
+    const comparisonRoot = new THREE.Group()
+    const comparisonModels = new Map<ScaleComparisonShape, THREE.Group>()
+    const comparisonBounds = new Map<ScaleComparisonShape, THREE.Box3>()
+    for (const comparison of SCALE_COMPARISONS) {
+      const model = createComparisonModel(comparison.id)
+      comparisonBounds.set(comparison.id, new THREE.Box3().setFromObject(model))
+      model.visible = false
+      comparisonModels.set(comparison.id, model)
+      comparisonRoot.add(model)
+    }
+    scene.add(comparisonRoot)
+
+    const baseGridDivisions = 10
+    const gridOpacity = 0.82
+    const makeReferenceGrid = (level: number, y: number) => {
+      // Only dyadic levels are created. Moving up one level doubles the line
+      // count on each axis, so every existing square is divided into four.
+      const divisions = baseGridDivisions * 2 ** level
+      const nextGrid = new THREE.GridHelper(1.5, divisions, 0x102a34, 0x102a34)
+      nextGrid.position.y = y
+      const nextMaterial = nextGrid.material as THREE.Material
+      nextMaterial.transparent = true
+      nextMaterial.depthWrite = false
+      return nextGrid
+    }
+    const setReferenceGridOpacity = (target: THREE.GridHelper, opacity: number) => {
+      const targetMaterial = target.material as THREE.Material
+      targetMaterial.opacity = gridOpacity * opacity
+      target.visible = opacity > 0.001
+    }
+    const disposeReferenceGrid = (target: THREE.GridHelper) => {
+      scene.remove(target)
+      target.geometry.dispose()
+      ;(target.material as THREE.Material).dispose()
+    }
+
+    const initialGridScale = Math.max(1, Math.min(100, 1e-6 / props.simulation.boxLengthMeters))
+    let referenceGridLevel = Math.floor(Math.log2(initialGridScale))
+    let coarseGrid = makeReferenceGrid(referenceGridLevel, -0.506)
+    let fineGrid = makeReferenceGrid(referenceGridLevel + 1, -0.505)
+    scene.add(coarseGrid, fineGrid)
+
+    const updateReferenceGrid = (visualScale: number) => {
+      const continuousLevel = Math.max(0, Math.log2(visualScale))
+      const nextLevel = Math.floor(continuousLevel)
+      if (nextLevel !== referenceGridLevel) {
+        disposeReferenceGrid(coarseGrid)
+        disposeReferenceGrid(fineGrid)
+        referenceGridLevel = nextLevel
+        coarseGrid = makeReferenceGrid(referenceGridLevel, -0.506)
+        fineGrid = makeReferenceGrid(referenceGridLevel + 1, -0.505)
+        scene.add(coarseGrid, fineGrid)
+      }
+
+      coarseGrid.scale.set(visualScale, 1, visualScale)
+      fineGrid.scale.set(visualScale, 1, visualScale)
+      const levelProgress = continuousLevel - referenceGridLevel
+      const fade = levelProgress * levelProgress * (3 - 2 * levelProgress)
+      setReferenceGridOpacity(coarseGrid, 1 - fade)
+      setReferenceGridOpacity(fineGrid, fade)
+    }
+    updateReferenceGrid(initialGridScale)
 
     const resize = () => {
       const { clientWidth, clientHeight } = host
@@ -223,7 +492,7 @@ export function SimulationView(props: SimulationViewProps) {
         previousGeometry.dispose()
       }
       if (current.playing) {
-        const physicalDt = wallDt * 2e-8 * current.speedMultiplier
+        const physicalDt = wallDt * 2e-10 * current.speedMultiplier
         current.simulation.advance(
           physicalDt,
           current.thermostatEnabled ? current.thermostatRate : 0,
@@ -238,14 +507,35 @@ export function SimulationView(props: SimulationViewProps) {
       // coordinates, while the larger grid makes a shorter physical box read as
       // smaller. Marker scaling compounds with, but does not alter, the user's
       // nominal marker-size control.
-      const boxVisualScale = Math.max(1, Math.min(10, 1e-6 / current.simulation.boxLengthMeters))
+      const boxVisualScale = Math.max(1, Math.min(100, 1e-6 / current.simulation.boxLengthMeters))
       const automaticMarkerScale = Math.sqrt(boxVisualScale)
-      grid.scale.setScalar(boxVisualScale)
+      updateReferenceGrid(boxVisualScale)
       const populationScale = Math.max(0.32, Math.min(2.2, Math.sqrt(10_000 / current.simulation.count)))
-      material.uniforms.pointScale.value = 0.72 * Math.min(window.devicePixelRatio, 1.75) * current.particleMarkerSize * populationScale * automaticMarkerScale
+      const markerDiameterScale = current.particleMarkerDiameterAngstrom / COLLISION_DIAMETERS_ANGSTROM.Argon
+      material.uniforms.pointScale.value = 0.72 * Math.min(window.devicePixelRatio, 1.75) * markerDiameterScale * populationScale * automaticMarkerScale
       material.uniforms.unfocusedOpacity.value = current.unfocusedOpacity
-      trackedMarker.scale.setScalar(Math.max(0.5, current.particleMarkerSize * automaticMarkerScale))
+      material.uniforms.particleFuzziness.value = current.particleFuzziness
+      material.uniforms.particleOpacity.value = current.particleOpacity
+      trackedMarker.scale.setScalar(Math.max(0.5, markerDiameterScale * automaticMarkerScale))
+      ;(trackedMarker.material as THREE.MeshBasicMaterial).opacity = 0.95 * current.particleOpacity
       thermalFace.visible = current.thermostatEnabled && current.singleFaceBath
+
+      const selectedComparison = getScaleComparison(current.scaleComparison)
+      for (const [id, model] of comparisonModels) model.visible = id === selectedComparison?.id
+      if (selectedComparison) {
+        const model = comparisonModels.get(selectedComparison.id)
+        const bounds = comparisonBounds.get(selectedComparison.id)
+        if (model && bounds) {
+          const physicalRatio = selectedComparison.sizeMeters / current.simulation.boxLengthMeters
+          const displayScale = THREE.MathUtils.clamp(0.42 + 0.12 * Math.log10(physicalRatio), 0.18, 0.65)
+          model.scale.setScalar(displayScale)
+          model.position.set(
+            0.62 - bounds.min.x * displayScale,
+            -0.495 - bounds.min.y * displayScale,
+            0.08,
+          )
+        }
+      }
 
       if (current.trackParticle && current.simulation.count > 0) {
         const trackedIndex = Math.max(0, Math.min(current.simulation.count - 1, current.trackedParticleIndex))
@@ -396,12 +686,16 @@ export function SimulationView(props: SimulationViewProps) {
       ;(trackedMarker.material as THREE.Material).dispose()
       trailGeometry.dispose()
       trailMaterial.dispose()
-      grid.geometry.dispose()
-      ;(grid.material as THREE.Material).dispose()
+      disposeReferenceGrid(coarseGrid)
+      disposeReferenceGrid(fineGrid)
+      disposeComparisonModels(comparisonRoot)
       renderer.dispose()
       renderer.domElement.remove()
     }
   }, [props.simulation])
+
+  const selectedComparison = getScaleComparison(props.scaleComparison)
+  const comparisonRatio = selectedComparison ? selectedComparison.sizeMeters / props.simulation.boxLengthMeters : 0
 
   return (
     <div className="simulation-shell">
@@ -417,6 +711,14 @@ export function SimulationView(props: SimulationViewProps) {
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
       <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · particles enlarged for visibility</div>
+      {selectedComparison && (
+        <div className="scale-comparison-badge">
+          <span>REAL-WORLD COMPARISON</span>
+          <b>{selectedComparison.label}</b>
+          <small>{selectedComparison.sizeLabel} {selectedComparison.measurement} · {formatScaleRatio(comparisonRatio)} box</small>
+          <i>adaptive display scale</i>
+        </div>
+      )}
       {props.thermostatEnabled && props.singleFaceBath && (
         <div className="face-contact-badge"><i /> +X THERMAL CONTACT</div>
       )}
