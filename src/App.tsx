@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { DistributionChart } from './components/DistributionChart'
+import { EntryDialog } from './components/EntryDialog'
 import { MomentumSpaceView } from './components/MomentumSpaceView'
 import { SimulationView } from './components/SimulationView'
+import { initialWalkthrough, isModuleVisible, WALKTHROUGH_STEPS, walkthroughReducer, WalkthroughModule, WalkthroughTask } from './walkthrough'
 import {
   BOLTZMANN,
   COLLISION_DIAMETERS_ANGSTROM,
@@ -40,6 +42,24 @@ function formatSimulationRate(multiplier: number): string {
 }
 
 function App() {
+  const [walkthrough, dispatchWalkthrough] = useReducer(walkthroughReducer, initialWalkthrough)
+  const walking = walkthrough.mode === 'walkthrough'
+  const currentStep = WALKTHROUGH_STEPS[walkthrough.step]
+  const currentTask = currentStep.tasks[walkthrough.task]
+  const lastTask = walkthrough.task === currentStep.tasks.length - 1
+  const visible = (module: WalkthroughModule) => isModuleVisible(walkthrough, module)
+  const currentModuleClass = (module: WalkthroughModule) => walking && currentStep.id === module ? ' walkthrough-current' : ''
+  const completeTask = (task: WalkthroughTask) => dispatchWalkthrough({ type: 'interact', task })
+
+  useEffect(() => {
+    if (!walking) return
+    const target = currentTask.id === 'momentum-orbit'
+      ? document.querySelector<HTMLElement>('.momentum-space-canvas')
+      : document.getElementById(`walkthrough-${currentStep.id}`)
+    target?.focus({ preventScroll: true })
+    target?.scrollIntoView({ block: 'nearest' })
+  }, [walking, currentStep.id, currentTask.id])
+
   const [temperature, setTemperature] = useState(300)
   const [temperatureDraft, setTemperatureDraft] = useState('300')
   const [massAmu, setMassAmu] = useState<number>(GAS_SPECIES.Argon)
@@ -82,9 +102,10 @@ function App() {
   const [trackedParticleIndex, setTrackedParticleIndex] = useState(0)
   const [showMomentumSpace, setShowMomentumSpace] = useState(true)
   const [momentumPointSize, setMomentumPointSize] = useState(1)
+  const [momentumViewResetKey, setMomentumViewResetKey] = useState(0)
   const [brownianEnabled, setBrownianEnabled] = useState(false)
   const [brownianDiameterAngstrom, setBrownianDiameterAngstrom] = useState(100)
-  const [brownianMassAmu, setBrownianMassAmu] = useState(1e6)
+  const [brownianMassAmu, setBrownianMassAmu] = useState(1e4)
   const [brownianFocus, setBrownianFocus] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [stats, setStats] = useState<SimulationStats>(() => simulation.statistics())
@@ -147,11 +168,15 @@ function App() {
 
   const applyTemperature = useCallback((next: number) => {
     const value = Math.max(5, Math.min(5000, Number.isFinite(next) ? next : 300))
+    if (value !== simulation.targetTemperature) {
+      if (value >= 500) dispatchWalkthrough({ type: 'interact', task: 'heat' })
+      if (value < 10 && thermalBathMode === 'one') dispatchWalkthrough({ type: 'interact', task: 'cool' })
+    }
     setTemperature(value)
     setTemperatureDraft(String(value))
     simulation.targetTemperature = value
     setThermostatEnabled(true)
-  }, [simulation])
+  }, [simulation, thermalBathMode])
 
   const commitTemperatureDraft = useCallback(() => {
     if (temperatureDraft.trim() === '') {
@@ -206,10 +231,11 @@ function App() {
 
   const applyBoxLength = useCallback((nextMicrometers: number) => {
     const micrometers = Math.max(0.01, Math.min(1, Number.isFinite(nextMicrometers) ? nextMicrometers : 0.1))
+    if (micrometers !== boxLengthMicrometers) dispatchWalkthrough({ type: 'interact', task: 'box-size' })
     setBoxLengthMicrometers(micrometers)
     simulation.setBoxLength(micrometers * 1e-6)
     setStats(simulation.statistics())
-  }, [simulation])
+  }, [simulation, boxLengthMicrometers])
 
   const rebuildSimulation = useCallback((count: number, temp: number, mass: number) => {
     const next = new GasSimulation(count, temp, mass, Math.random, boxLengthMicrometers * 1e-6)
@@ -219,6 +245,7 @@ function App() {
 
   const resizeParticlePopulation = useCallback((nextCount: number) => {
     const count = Math.max(100, Math.min(50_000, Math.round(nextCount / 100) * 100))
+    if (count !== simulation.count) dispatchWalkthrough({ type: 'interact', task: 'population' })
     simulation.resizeParticleCount(count)
     setParticleCount(count)
     setStats(simulation.statistics())
@@ -239,6 +266,7 @@ function App() {
   }
 
   const applyCollisionDiameter = (next: number) => {
+    if (next > collisionDiameterAngstrom) completeTask('collision-diameter')
     setCollisionDiameterAngstrom(next)
     if (matchMarkerToCollisionDiameter) setParticleMarkerDiameterAngstrom(next)
   }
@@ -278,8 +306,17 @@ function App() {
     setStats(simulation.statistics())
   }
 
-  const resetSimulationOptions = () => {
-    const nextSimulation = new GasSimulation(25_000, 300, GAS_SPECIES.Argon, Math.random, 0.1e-6)
+  const resetSimulationOptions = (preserveGasView = false) => {
+    const nextSimulation = preserveGasView ? simulation : new GasSimulation(25_000, 300, GAS_SPECIES.Argon, Math.random, 0.1e-6)
+    if (preserveGasView) {
+      // Reuse the model so the physical renderer keeps its camera and pan target.
+      nextSimulation.setBrownianObject(false)
+      nextSimulation.setMass(GAS_SPECIES.Argon, false)
+      nextSimulation.setBoxLength(0.1e-6)
+      nextSimulation.targetTemperature = 300
+      nextSimulation.resizeParticleCount(25_000)
+      nextSimulation.reset(300)
+    }
     setTemperature(300)
     setTemperatureDraft('300')
     setMassAmu(GAS_SPECIES.Argon)
@@ -322,12 +359,25 @@ function App() {
     setTrackedParticleIndex(0)
     setShowMomentumSpace(true)
     setMomentumPointSize(1)
+    setMomentumViewResetKey((value) => value + 1)
     setBrownianEnabled(false)
     setBrownianDiameterAngstrom(100)
-    setBrownianMassAmu(1e6)
+    setBrownianMassAmu(1e4)
     setBrownianFocus(false)
     setShowInfo(false)
     setStats(nextSimulation.statistics())
+  }
+
+  const advanceWalkthrough = () => {
+    const next = walkthroughReducer(walkthrough, { type: 'next' })
+    if (next.step !== walkthrough.step) resetSimulationOptions(true)
+    if (next !== walkthrough && WALKTHROUGH_STEPS[next.step].tasks[next.task].id === 'occlusion') {
+      setCollisionDiameterAngstrom(20)
+      setParticleMarkerDiameterAngstrom(20)
+      setMatchMarkerToCollisionDiameter(true)
+      setParticleOcclusionEnabled(false)
+    }
+    dispatchWalkthrough({ type: 'next' })
   }
 
   const toggleThermalBath = () => {
@@ -335,6 +385,7 @@ function App() {
   }
 
   const selectThermalBathMode = (mode: ThermalBathMode) => {
+    if (mode === 'one') completeTask('one-face')
     if (mode === 'two' && thermalBathMode !== 'two') {
       setSecondaryWallTemperature(temperature)
       setSecondaryWallMatchesMain(true)
@@ -382,11 +433,13 @@ function App() {
 
   const setUniformRmsSpeed = () => {
     simulation.setUniformRmsSpeed()
+    completeTask('starting-condition')
     setStats(simulation.statistics())
   }
 
   const alignVelocities = (axis: 0 | 1 | 2) => {
     simulation.alignVelocitiesToAxis(axis)
+    completeTask('starting-condition')
     setStats(simulation.statistics())
   }
 
@@ -421,9 +474,35 @@ function App() {
         <div className="topbar-meta">
           <span><i className="live-dot" /> LIVE MODEL</span>
           <button className="info-button" onClick={() => setShowInfo((value) => !value)} aria-expanded={showInfo}>i</button>
-          <button className="header-reset-button" type="button" onClick={resetSimulationOptions}>RESET SIMULATION</button>
+          <button className="header-reset-button" type="button" onClick={() => resetSimulationOptions()}>RESET SIMULATION</button>
         </div>
       </header>
+
+      {walkthrough.mode === 'choose' && (
+        <EntryDialog onWalkthrough={() => dispatchWalkthrough({ type: 'start' })} onFullAccess={() => dispatchWalkthrough({ type: 'full' })} />
+      )}
+
+      <section className={`workspace${walking ? ' walkthrough-workspace' : ''}`}>
+      {walking && (
+        <aside className="walkthrough-guide" data-step={currentStep.id} aria-label="Walkthrough">
+          <div className="walkthrough-copy">
+            <span className="eyebrow">WALKTHROUGH · {walkthrough.step + 1} OF {WALKTHROUGH_STEPS.length} · TASK {walkthrough.task + 1} OF {currentStep.tasks.length}</span>
+            <h2>{currentStep.title}</h2>
+            <p>{currentTask.prompt}</p>
+            <span className="walkthrough-status" role="status">
+              {walkthrough.completed ? `Task complete. Ready for the next ${lastTask ? 'module' : 'task'}.` : currentStep.id === 'zoom'
+                ? `Zoom in: ${walkthrough.zoomedIn ? 'done' : 'to do'} · Zoom out: ${walkthrough.zoomedOut ? 'done' : 'to do'}`
+                : 'Try the task above to continue.'}
+            </span>
+          </div>
+          <div className="walkthrough-actions">
+            <button type="button" className="walkthrough-next" disabled={!walkthrough.completed} onClick={advanceWalkthrough}>
+              {!lastTask ? 'NEXT TASK' : walkthrough.step === WALKTHROUGH_STEPS.length - 1 ? 'FINISH WALKTHROUGH' : 'NEXT MODULE'}
+            </button>
+            <button type="button" onClick={() => dispatchWalkthrough({ type: 'full' })}>FULL ACCESS NOW</button>
+          </div>
+        </aside>
+      )}
 
       {showInfo && (
         <div className="info-modal-backdrop" role="presentation" onMouseDown={() => setShowInfo(false)}>
@@ -443,8 +522,10 @@ function App() {
         </div>
       )}
 
-      <section className="workspace">
         <SimulationView
+          onZoom={walking && currentStep.id === 'zoom' ? (direction) => dispatchWalkthrough({ type: 'zoom', direction }) : undefined}
+          showDiagnostics={visible('population')}
+          walkthroughCurrent={walking && currentStep.id === 'zoom'}
           simulation={simulation}
           playing={playing}
           speedMultiplier={speedMultiplier}
@@ -473,7 +554,7 @@ function App() {
           trackedParticleIndex={trackedParticleIndex}
         />
 
-        <section className={`momentum-panel ${showMomentumSpace ? 'active' : ''}`}>
+        {visible('momentum') && <section id="walkthrough-momentum" tabIndex={-1} className={`momentum-panel ${showMomentumSpace ? 'active' : ''}${currentModuleClass('momentum')}`}>
           <div className="panel-heading momentum-panel-heading">
             <div>
               <span className="eyebrow">MOMENTUM SPACE</span>
@@ -487,6 +568,8 @@ function App() {
           {showMomentumSpace ? (
             <>
               <MomentumSpaceView
+                key={momentumViewResetKey}
+                onOrbit={walking && currentTask.id === 'momentum-orbit' ? () => completeTask('momentum-orbit') : undefined}
                 simulation={simulation}
                 highlightFast={highlightFast}
                 speedThreshold={speedThreshold}
@@ -508,7 +591,10 @@ function App() {
                   max="3"
                   step="0.1"
                   value={momentumPointSize}
-                  onChange={(event) => setMomentumPointSize(Number(event.target.value))}
+                  onChange={(event) => {
+                    setMomentumPointSize(Number(event.target.value))
+                    completeTask('momentum')
+                  }}
                   onDoubleClick={() => setMomentumPointSize(1)}
                   title="Double-click to reset"
                 />
@@ -522,9 +608,9 @@ function App() {
               <button onClick={() => setShowMomentumSpace(true)}>ENABLE MOMENTUM SPACE</button>
             </div>
           )}
-        </section>
+        </section>}
 
-        <section className="analysis-panel">
+        {visible('distribution') && <section id="walkthrough-distribution" tabIndex={-1} className={`analysis-panel${currentModuleClass('distribution')}`}>
           <div className="panel-heading">
             <div>
               <span className="eyebrow">SPEED DISTRIBUTION</span>
@@ -535,7 +621,7 @@ function App() {
             <span className="sample-label">N = {particleCount.toLocaleString()}</span>
             <label className="chart-bins-control">
               <span>HISTOGRAM BINS</span>
-              <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => setBins(Number(event.target.value))} onDoubleClick={() => setBins(100)} title="Double-click to reset" />
+              <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => { setBins(Number(event.target.value)); completeTask('distribution') }} onDoubleClick={() => setBins(100)} title="Double-click to reset" />
               <b>{bins}</b>
             </label>
           </div>
@@ -569,12 +655,12 @@ function App() {
             <article><span>Number density</span><strong>{numberDensityM3.toExponential(3)} <small>#/m³</small></strong></article>
             <article><span>Ideal gas pressure</span><strong>{idealGasPressure < 100 ? idealGasPressure.toFixed(2) : idealGasPressure.toFixed(1)} <small>Pa</small></strong></article>
           </div>
-        </section>
+        </section>}
       </section>
 
-      <section className="control-deck">
-        <div className="playback-block">
-          <span className="control-title">SIMULATION</span>
+      <section className={`control-deck${walking ? ' walkthrough-deck' : ''}`}>
+        {visible('simulation') && <div id="walkthrough-simulation" tabIndex={0} role="region" aria-labelledby="simulation-controls-title" className={`playback-block${currentModuleClass('simulation')}`}>
+          <span id="simulation-controls-title" className="control-title">SIMULATION</span>
           <div className="transport">
             <div className="transport-actions">
               <button className="primary-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>
@@ -603,13 +689,19 @@ function App() {
             <input
               type="range"
               min="-2"
-              max={Math.log10(100)}
+              max={Math.log10(10)}
               step="0.05"
               value={Math.log10(speedMultiplier)}
-              onChange={(event) => setSpeedMultiplier(10 ** Number(event.target.value))}
+              onChange={(event) => {
+                const value = 10 ** Number(event.target.value)
+                setSpeedMultiplier(value)
+                if (value > 1) completeTask('speed-up')
+                if (value < 1) completeTask('slow-down')
+              }}
               onDoubleClick={() => setSpeedMultiplier(1)}
               title="Double-click to reset"
             />
+            <span className="slider-endpoints"><i>0.01×</i><i>Log Scale</i><i>10×</i></span>
           </label>
           <label className="compact-slider box-size-slider">
             <span>BOX SIDE LENGTH <b>{boxLengthMicrometers < 0.1 ? boxLengthMicrometers.toFixed(3) : boxLengthMicrometers.toFixed(2)} μm</b></span>
@@ -623,26 +715,22 @@ function App() {
               onDoubleClick={() => applyBoxLength(0.1)}
               title="Double-click to reset"
             />
-            <span className="slider-endpoints"><i>0.01 μm</i><i>1.00 μm</i></span>
+            <span className="slider-endpoints"><i>0.01 μm</i><i>Log Scale</i><i>1.00 μm</i></span>
           </label>
           <div className="starting-conditions">
             <span>STARTING CONDITIONS</span>
             <div className="starting-condition-grid">
               <button onClick={setUniformRmsSpeed} title="Give every particle the ensemble RMS speed while preserving total kinetic energy and direction">
                 <b>RMS SPEED</b>
-                <small>equal |v| · energy fixed</small>
               </button>
               <button onClick={() => alignVelocities(0)} title="Align every velocity with the positive or negative x axis">
                 <b>X-ALIGNED</b>
-                <small>velocity along ±x</small>
               </button>
               <button onClick={() => alignVelocities(1)} title="Align every velocity with the positive or negative y axis">
                 <b>Y-ALIGNED</b>
-                <small>velocity along ±y</small>
               </button>
               <button onClick={() => alignVelocities(2)} title="Align every velocity with the positive or negative z axis">
                 <b>Z-ALIGNED</b>
-                <small>velocity along ±z</small>
               </button>
             </div>
           </div>
@@ -685,10 +773,10 @@ function App() {
                     step="0.1"
                     value={Math.log10(brownianMassAmu)}
                     onChange={(event) => setBrownianMassAmu(10 ** Number(event.target.value))}
-                    onDoubleClick={() => setBrownianMassAmu(1e6)}
+                    onDoubleClick={() => setBrownianMassAmu(1e4)}
                     title="Logarithmic mass scale · double-click to reset"
                   />
-                  <small>10³ u · logarithmic · 10⁹ u</small>
+                  <small><span>10³ u</span><span>Log Scale</span><span>10⁹ u</span></small>
                 </label>
                 <button
                   type="button"
@@ -702,10 +790,10 @@ function App() {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
-        <div className="control-block temperature-block">
-          <span className="control-title">TEMPERATURE</span>
+        {visible('temperature') && <div id="walkthrough-temperature" tabIndex={0} role="region" aria-labelledby="temperature-controls-title" className={`control-block temperature-block${currentModuleClass('temperature')}`}>
+          <span id="temperature-controls-title" className="control-title">TEMPERATURE</span>
           <div className="input-with-unit">
             <input
               type="number"
@@ -724,8 +812,8 @@ function App() {
             />
             <span>K</span>
           </div>
-          <input className="wide-slider" type="range" min="5" max="5000" step="5" value={temperature} onChange={(event) => applyTemperature(Number(event.target.value))} onDoubleClick={() => applyTemperature(300)} title="Double-click to reset" />
-          <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
+          <input className="wide-slider" type="range" min="0" max="3" step="0.001" value={Math.log10(temperature / 5)} onChange={(event) => applyTemperature(Math.round(5 * 10 ** Number(event.target.value)))} onDoubleClick={() => applyTemperature(300)} aria-label="Target temperature" aria-valuemin={5} aria-valuemax={5000} aria-valuenow={temperature} aria-valuetext={`${temperature} kelvin, logarithmic scale`} title="Logarithmic temperature scale · double-click to reset" />
+          <div className="range-labels"><span>5 K</span><span>Log Scale</span><span>5,000 K</span></div>
           <button
             type="button"
             className={`thermal-bath-master ${thermostatEnabled ? 'active' : ''}`}
@@ -822,25 +910,30 @@ function App() {
               <input
                 className="wide-slider secondary-temperature-slider"
                 type="range"
-                min="5"
-                max="5000"
-                step="5"
+                min="0"
+                max="3"
+                step="0.001"
                 disabled={secondaryWallMatchesMain}
-                value={effectiveSecondaryWallTemperature}
-                onChange={(event) => setSecondaryWallTemperature(Number(event.target.value))}
+                value={Math.log10(effectiveSecondaryWallTemperature / 5)}
+                onChange={(event) => setSecondaryWallTemperature(Math.round(5 * 10 ** Number(event.target.value)))}
                 onDoubleClick={() => {
                   setSecondaryWallTemperature(temperature)
                   setSecondaryWallMatchesMain(true)
                 }}
-                title="Double-click to match the main temperature"
+                aria-label="Second wall temperature"
+                aria-valuemin={5}
+                aria-valuemax={5000}
+                aria-valuenow={effectiveSecondaryWallTemperature}
+                aria-valuetext={`${effectiveSecondaryWallTemperature} kelvin, logarithmic scale`}
+                title="Logarithmic temperature scale · double-click to match the main temperature"
               />
-              <div className="range-labels"><span>5 K</span><span>5,000 K</span></div>
+              <div className="range-labels"><span>5 K</span><span>Log Scale</span><span>5,000 K</span></div>
             </div>
           )}
-        </div>
+        </div>}
 
-        <div className="control-block gas-population-block">
-          <span className="control-title">GAS & PARTICLE POPULATION</span>
+        {visible('population') && <div id="walkthrough-population" tabIndex={0} role="region" aria-labelledby="population-controls-title" className={`control-block gas-population-block${currentModuleClass('population')}`}>
+          <span id="population-controls-title" className="control-title">GAS & PARTICLE POPULATION</span>
           <select value={species} onChange={(event) => changeSpecies(event.target.value as SpeciesSelection)}>
             {Object.keys(GAS_SPECIES).map((name) => <option key={name}>{name}</option>)}
             <option>Custom</option>
@@ -932,20 +1025,20 @@ function App() {
             type="button"
             className={`particle-occlusion-button ${particleOcclusionEnabled ? 'active' : ''}`}
             aria-pressed={particleOcclusionEnabled}
-            onClick={() => setParticleOcclusionEnabled((value) => !value)}
+            onClick={() => { setParticleOcclusionEnabled((value) => !value); if (!particleOcclusionEnabled) completeTask('occlusion') }}
           >
             <b>PARTICLE OCCLUSION {particleOcclusionEnabled ? 'ON' : 'OFF'}</b>
             <span>{particleOcclusionEnabled ? 'nearest particles hide particles behind them' : 'additive transparent particle cloud'}</span>
           </button>
-        </div>
+        </div>}
 
-        <div className="control-block focus-block">
-          <span className="control-title">PARTICLE FOCUS & TRACKING</span>
+        {visible('focus') && <div id="walkthrough-focus" tabIndex={0} role="region" aria-labelledby="focus-controls-title" className={`control-block focus-block${currentModuleClass('focus')}`}>
+          <span id="focus-controls-title" className="control-title">PARTICLE FOCUS & TRACKING</span>
           <div className="focus-button-grid">
-            <button className={`focus-button hot ${highlightFast ? 'active' : ''}`} aria-pressed={highlightFast} onClick={() => setHighlightFast((value) => !value)}><b>HOT</b><span>above cutoff</span></button>
-            <button className={`focus-button cold ${highlightCold ? 'active' : ''}`} aria-pressed={highlightCold} onClick={() => setHighlightCold((value) => !value)}><b>COLD</b><span>below cutoff</span></button>
-            <button className={`focus-button band ${highlightBand ? 'active' : ''}`} aria-pressed={highlightBand} onClick={() => setHighlightBand((value) => !value)}><b>BAND</b><span>speed window</span></button>
-            <button className={`focus-button random ${trackParticle ? 'active' : ''}`} aria-pressed={trackParticle} onClick={() => setTrackParticle((value) => !value)}><b>RANDOM</b><span>single atom</span></button>
+            <button className={`focus-button hot ${highlightFast ? 'active' : ''}`} aria-pressed={highlightFast} onClick={() => { setHighlightFast((value) => !value); if (!highlightFast) completeTask('focus') }}><b>HOT</b><span>above cutoff</span></button>
+            <button className={`focus-button cold ${highlightCold ? 'active' : ''}`} aria-pressed={highlightCold} onClick={() => { setHighlightCold((value) => !value); if (!highlightCold) completeTask('focus') }}><b>COLD</b><span>below cutoff</span></button>
+            <button className={`focus-button band ${highlightBand ? 'active' : ''}`} aria-pressed={highlightBand} onClick={() => { setHighlightBand((value) => !value); if (!highlightBand) completeTask('focus') }}><b>BAND</b><span>speed window</span></button>
+            <button className={`focus-button random ${trackParticle ? 'active' : ''}`} aria-pressed={trackParticle} onClick={() => { setTrackParticle((value) => !value); if (!trackParticle) completeTask('focus') }}><b>RANDOM</b><span>single atom</span></button>
           </div>
           {trackParticle && (
             <button
@@ -1052,7 +1145,7 @@ function App() {
             <span>OTHER PARTICLES <b>{Math.round(unfocusedOpacity * 100)}% opacity</b></span>
             <input className="threshold-slider" type="range" min="0.02" max="0.75" step="0.01" disabled={!focusActive} value={unfocusedOpacity} onChange={(event) => setUnfocusedOpacity(Number(event.target.value))} onDoubleClick={() => setUnfocusedOpacity(0.18)} title="Double-click to reset" />
           </label>
-        </div>
+        </div>}
 
       </section>
 

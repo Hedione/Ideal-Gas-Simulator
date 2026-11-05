@@ -6,4 +6,6 @@ vite.config.js
 vite.config.d.ts
 .DS_Store
 AGENTS.md
+HANDOFF.md
+PROJECT_STYLE_GUIDE.md
 

@@ -4,6 +4,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GasSimulation, thermalSigma, ThermalWallContact } from '../physics'
 
 interface SimulationViewProps {
+  onZoom?: (direction: 'in' | 'out') => void
+  showDiagnostics?: boolean
+  walkthroughCurrent?: boolean
   simulation: GasSimulation
   playing: boolean
   speedMultiplier: number
@@ -180,6 +183,7 @@ export function SimulationView(props: SimulationViewProps) {
   const orientationLinesRef = useRef<Array<SVGLineElement | null>>([])
   const orientationLabelsRef = useRef<Array<SVGTextElement | null>>([])
   const settingsRef = useRef(props)
+  const zoomRef = useRef<(factor: number) => void>(() => {})
   settingsRef.current = props
 
   useEffect(() => {
@@ -202,6 +206,22 @@ export function SimulationView(props: SimulationViewProps) {
     controls.dampingFactor = 0.065
     controls.minDistance = 1.2
     controls.maxDistance = 6
+
+    let previousDistance = camera.position.distanceTo(controls.target)
+    const reportZoom = () => {
+      const distance = camera.position.distanceTo(controls.target)
+      if (Math.abs(distance - previousDistance) > 0.00001) {
+        settingsRef.current.onZoom?.(distance < previousDistance ? 'in' : 'out')
+      }
+      previousDistance = distance
+    }
+    controls.addEventListener('change', reportZoom)
+    zoomRef.current = (factor) => {
+      const offset = camera.position.clone().sub(controls.target)
+      offset.setLength(THREE.MathUtils.clamp(offset.length() * factor, controls.minDistance, controls.maxDistance))
+      camera.position.copy(controls.target).add(offset)
+      controls.update()
+    }
 
     let geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(props.simulation.positions, 3))
@@ -259,23 +279,21 @@ export function SimulationView(props: SimulationViewProps) {
     trackedTrail.visible = false
     scene.add(trackedTrail)
 
-    const brownianGeometry = new THREE.SphereGeometry(0.5, 28, 20)
-    const brownianMaterial = new THREE.MeshBasicMaterial({
+    const brownianGeometry = new THREE.SphereGeometry(0.5, 48, 32)
+    const brownianMaterial = new THREE.MeshPhongMaterial({
       color: 0xffc76b,
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: true,
+      specular: 0xffedcf,
+      shininess: 55,
     })
     const brownianTracer = new THREE.Mesh(brownianGeometry, brownianMaterial)
-    const brownianOutline = new THREE.Mesh(
-      brownianGeometry,
-      new THREE.MeshBasicMaterial({ color: 0xffe0a3, wireframe: true, transparent: true, opacity: 0.28 }),
-    )
-    brownianOutline.scale.setScalar(1.025)
-    const brownianGroup = new THREE.Group()
-    brownianGroup.add(brownianTracer, brownianOutline)
-    brownianGroup.visible = false
-    scene.add(brownianGroup)
+    brownianTracer.visible = false
+    scene.add(brownianTracer)
+    // Keep the soft highlight at the viewer's upper left while orbiting.
+    const brownianLight = new THREE.DirectionalLight(0xfff3df, 2)
+    brownianLight.position.set(-3, 4, 5)
+    brownianLight.target.position.set(0, 0, -1)
+    camera.add(brownianLight, brownianLight.target)
+    scene.add(camera, new THREE.AmbientLight(0xffffff, 0.55))
 
     const brownianTrailPositions = new Float32Array(maximumTrailSegments * 6)
     const brownianTrailGeometry = new THREE.BufferGeometry()
@@ -394,7 +412,6 @@ export function SimulationView(props: SimulationViewProps) {
     let previousBrownianPosition: THREE.Vector3 | null = null
     const trackedPosition = new THREE.Vector3()
     const brownianPosition = new THREE.Vector3()
-    const viewTarget = new THREE.Vector3()
     const drawingBufferSize = new THREE.Vector2()
     const boxCenterInCameraSpace = new THREE.Vector3()
     const cameraQuaternion = new THREE.Quaternion()
@@ -472,17 +489,17 @@ export function SimulationView(props: SimulationViewProps) {
       if (primaryWall) placeThermalFace(primaryThermalFace, primaryWall)
       if (secondaryWall) placeThermalFace(secondaryThermalFace, secondaryWall)
 
-      brownianGroup.visible = current.brownianEnabled
+      brownianTracer.visible = current.brownianEnabled
       brownianTrail.visible = current.brownianEnabled
       if (current.brownianEnabled) {
         const diameter = current.brownianDiameterAngstrom * 1e-10 / current.simulation.boxLengthMeters
-        brownianGroup.scale.setScalar(diameter)
+        brownianTracer.scale.setScalar(diameter)
         brownianPosition.set(
           current.simulation.brownianPosition[0] - 0.5,
           current.simulation.brownianPosition[1] - 0.5,
           current.simulation.brownianPosition[2] - 0.5,
         )
-        brownianGroup.position.copy(brownianPosition)
+        brownianTracer.position.copy(brownianPosition)
         if (!brownianWasEnabled) {
           brownianTrailSegmentCount = 0
           brownianTrailGeometry.setDrawRange(0, 0)
@@ -522,7 +539,6 @@ export function SimulationView(props: SimulationViewProps) {
           current.simulation.positions[positionIndex + 2] - 0.5,
         )
         trackedTrail.visible = true
-        controls.target.lerp(viewTarget, 0.08)
 
         if (activeTrackedParticle !== trackedIndex) {
           activeTrackedParticle = trackedIndex
@@ -590,7 +606,6 @@ export function SimulationView(props: SimulationViewProps) {
         trackedTrail.visible = false
         activeTrackedParticle = -1
         previousTrackedPosition = null
-        controls.target.lerp(viewTarget, 0.08)
       }
       if (frame % 2 === 0 || !current.playing) {
         const sigma = thermalSigma(current.simulation.targetTemperature, current.simulation.massAmu)
@@ -679,7 +694,9 @@ export function SimulationView(props: SimulationViewProps) {
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
+      controls.removeEventListener('change', reportZoom)
       controls.dispose()
+      zoomRef.current = () => {}
       geometry.dispose()
       material.dispose()
       depthMaterial.dispose()
@@ -695,7 +712,6 @@ export function SimulationView(props: SimulationViewProps) {
       trailMaterial.dispose()
       brownianGeometry.dispose()
       brownianMaterial.dispose()
-      ;(brownianOutline.material as THREE.Material).dispose()
       brownianTrailGeometry.dispose()
       brownianTrailMaterial.dispose()
       disposeReferenceGrid(coarseGrid)
@@ -711,13 +727,13 @@ export function SimulationView(props: SimulationViewProps) {
   const packingStatus = getPackingRegime(packingFraction)
 
   return (
-    <div className="simulation-shell">
+    <div id="walkthrough-zoom" tabIndex={-1} className={`simulation-shell${props.walkthroughCurrent ? ' walkthrough-current' : ''}`}>
       <div className="panel-heading overlay-heading">
         <div>
           <span className="eyebrow">LIVE PARTICLE FIELD</span>
           <h2>Microscopic view</h2>
         </div>
-        <div className="gas-diagnostic-stack">
+        {props.showDiagnostics !== false && <div className="gas-diagnostic-stack">
           <div className={`flow-regime-indicator ${flowRegime.key}`} title={`Current Knudsen number: ${props.knudsenNumber}`}>
             <b>{flowRegime.label}</b>
             <small>{flowRegime.criterion} · Kn = {formatKnudsenNumber(props.knudsenNumber)}</small>
@@ -726,9 +742,15 @@ export function SimulationView(props: SimulationViewProps) {
             <div><b>{packingStatus.label}</b><span>φ = {formatPackingFraction(packingFraction)}</span></div>
             <small>{packingStatus.detail}</small>
           </div>
-        </div>
+        </div>}
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
+      {props.onZoom && (
+        <div className="walkthrough-zoom-controls" role="group" aria-label="Simulation zoom">
+          <button type="button" onClick={() => zoomRef.current(0.8)}>Zoom in</button>
+          <button type="button" onClick={() => zoomRef.current(1.25)}>Zoom out</button>
+        </div>
+      )}
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
       <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · marker diameter to scale</div>
       {props.thermostatEnabled && props.thermalBathMode !== 'all' && (

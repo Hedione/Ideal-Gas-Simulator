@@ -175,6 +175,51 @@ describe('distribution calculations', () => {
 })
 
 describe('nonequilibrium controls', () => {
+  it('preserves RMS-preset energy during subsequent bath-off motion with and without DSMC', () => {
+    for (const dsmc of [false, true]) {
+      const simulation = new GasSimulation(4_000, 300, 39.948, seededRandom(4001), 1e-7)
+      simulation.setUniformRmsSpeed()
+      const before = simulation.statistics().measuredTemperature
+      for (let step = 0; step < 250; step += 1) simulation.advance(2e-12, 0, false, dsmc)
+      expect(simulation.statistics().measuredTemperature / before).toBeCloseTo(1, 6)
+      if (dsmc) expect(simulation.collisionDiagnostics.totalAccepted).toBeGreaterThan(0)
+    }
+  })
+
+  it('a thermal wall emits mean energy 2kT and heats an incident RMS-speed shell on average', () => {
+    const temperature = 300
+    const simulation = new GasSimulation(40_000, temperature, 39.948, seededRandom(4002), 1e-7)
+    const incidentSpeed = theoreticalRmsSpeed(temperature, 39.948)
+    for (let particle = 0; particle < simulation.count; particle += 1) {
+      simulation.positions.set([0.99999, 0.5, 0.5], particle * 3)
+      simulation.velocities.set([incidentSpeed, 0, 0], particle * 3)
+      simulation.speeds[particle] = incidentSpeed
+    }
+    simulation.advance(1e-14, 1)
+    expect(simulation.thermalAccommodationCounts.every((count) => count === 1)).toBe(true)
+    const meanEnergyInKT = simulation.statistics().meanKineticEnergy / (BOLTZMANN * temperature)
+    expect(Math.abs(meanEnergyInKT - 2)).toBeLessThan(0.025)
+    const gainedFraction = simulation.speeds.filter((speed) => speed > incidentSpeed).length / simulation.count
+    expect(Math.abs(gainedFraction - 2.5 * Math.exp(-1.5))).toBeLessThan(0.012)
+    expect(simulation.velocities.filter((_, index) => index % 3 === 0).every((speed) => speed < 0)).toBe(true)
+  })
+
+  it('the RMS shell heats transiently at thermal walls and then returns toward the bath temperature', () => {
+    const simulation = new GasSimulation(6_000, 300, 39.948, seededRandom(4001), 1e-7)
+    simulation.setUniformRmsSpeed()
+    const initial = simulation.statistics().measuredTemperature
+    let peak = initial
+    let lateTemperature = 0
+    for (let step = 0; step < 500; step += 1) {
+      simulation.advance(2e-12, 1)
+      const measured = simulation.statistics().measuredTemperature
+      peak = Math.max(peak, measured)
+      if (step >= 400) lateTemperature += measured / 100
+    }
+    expect(peak).toBeGreaterThan(initial * 1.08)
+    expect(Math.abs(lateTemperature / 300 - 1)).toBeLessThan(0.035)
+  })
+
   it('sets every particle to the ensemble RMS speed without changing directions or total energy', () => {
     const simulation = new GasSimulation(2_000, 450, 39.948, seededRandom(301))
     const firstDirection = Array.from(simulation.velocities.slice(0, 3))

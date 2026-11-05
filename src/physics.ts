@@ -279,7 +279,7 @@ export class GasSimulation {
   brownianPosition = new Float64Array([0.5, 0.5, 0.5])
   brownianVelocity = new Float64Array(3)
   brownianDiameterMeters = 100e-10
-  brownianMassAmu = 1e6
+  brownianMassAmu = 1e4
   brownianCollisionCount = 0
   readonly collisionDiagnostics: CollisionDiagnostics = {
     enabled: false,

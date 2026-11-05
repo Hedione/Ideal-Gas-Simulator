@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ATOMIC_MASS_UNIT, BOLTZMANN, GasSimulation, thermalSigma } from '../physics'
 
 interface MomentumSpaceViewProps {
+  onOrbit?: () => void
   simulation: GasSimulation
   highlightFast: boolean
   speedThreshold: number
@@ -66,6 +67,7 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
   const momentumReferenceLabelRef = useRef<HTMLSpanElement>(null)
   const momentumReferenceBarRef = useRef<HTMLElement>(null)
   const settingsRef = useRef(props)
+  const orbitRef = useRef<(direction: number) => void>(() => {})
   settingsRef.current = props
 
   useEffect(() => {
@@ -88,6 +90,38 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     controls.dampingFactor = 0.07
     controls.minDistance = 1.45
     controls.maxDistance = 7
+    controls.update()
+    const lastRotation = camera.quaternion.clone()
+    let orbitInteraction = false
+    let pointerOrbit = false
+    const preparePointerOrbit = (event: PointerEvent) => {
+      pointerOrbit = event.pointerType === 'touch' || event.button === 0
+    }
+    const beginOrbit = () => {
+      // Wheel zoom may carry old damping; require a new pointer rotation gesture.
+      orbitInteraction = pointerOrbit && Boolean(settingsRef.current.onOrbit)
+      lastRotation.copy(camera.quaternion)
+    }
+    const endOrbit = () => { orbitInteraction = false; pointerOrbit = false }
+    const reportOrbit = () => {
+      if (orbitInteraction && camera.quaternion.angleTo(lastRotation) > 0.01) {
+        settingsRef.current.onOrbit?.()
+        lastRotation.copy(camera.quaternion)
+      }
+    }
+    controls.addEventListener('start', beginOrbit)
+    controls.addEventListener('end', endOrbit)
+    controls.addEventListener('change', reportOrbit)
+    renderer.domElement.addEventListener('pointerdown', preparePointerOrbit, true)
+    orbitRef.current = (direction) => {
+      orbitInteraction = Boolean(settingsRef.current.onOrbit)
+      lastRotation.copy(camera.quaternion)
+      const offset = camera.position.clone().sub(controls.target)
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), direction * Math.PI / 12)
+      camera.position.copy(controls.target).add(offset)
+      controls.update()
+      endOrbit()
+    }
 
     let coordinates = new Float32Array(props.simulation.count * 3)
     let colors = new Float32Array(props.simulation.count * 3)
@@ -241,7 +275,12 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
+      controls.removeEventListener('start', beginOrbit)
+      controls.removeEventListener('end', endOrbit)
+      controls.removeEventListener('change', reportOrbit)
+      renderer.domElement.removeEventListener('pointerdown', preparePointerOrbit, true)
       controls.dispose()
+      orbitRef.current = () => {}
       geometry.dispose()
       material.dispose()
       ;(bounds.geometry as THREE.BufferGeometry).dispose()
@@ -256,7 +295,17 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
 
   return (
     <div className="momentum-space-shell">
-      <div ref={hostRef} className="momentum-space-canvas" aria-label="Interactive three-dimensional particle momentum-space distribution" />
+      <div
+        ref={hostRef}
+        className="momentum-space-canvas"
+        tabIndex={props.onOrbit ? 0 : undefined}
+        aria-label="Interactive three-dimensional particle momentum-space distribution. Use Left/Right arrow keys to rotate during the walkthrough."
+        onKeyDown={(event) => {
+          if (!props.onOrbit || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
+          event.preventDefault()
+          orbitRef.current(event.key === 'ArrowLeft' ? -1 : 1)
+        }}
+      />
       <div className="momentum-axis-key" aria-hidden="true">
         <span className="axis-x">p<sub>x</sub></span>
         <span className="axis-y">p<sub>y</sub></span>
