@@ -23,7 +23,7 @@ export const WALKTHROUGH_STEPS = [
     { id: 'momentum-orbit', prompt: 'Drag the momentum cloud to explore it in 3D.' },
   ] },
   { id: 'distribution', title: 'Read the speed distribution', tasks: [
-    { id: 'distribution', prompt: 'Change HISTOGRAM BINS to regroup the measured speeds. Compare the histogram with the Maxwell–Boltzmann curve.' },
+    { id: 'distribution', prompt: 'Change BINS beside Maxwell–Boltzmann profile to regroup the measured speeds. Compare the histogram with the Maxwell–Boltzmann curve.' },
   ] },
   { id: 'focus', title: 'Focus & track particles', tasks: [
     { id: 'focus', prompt: 'Enable HOT, COLD, BAND, or RANDOM to highlight a group of particles or follow a single atom.' },

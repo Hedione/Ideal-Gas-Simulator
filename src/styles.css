@@ -89,7 +89,7 @@ button { color: inherit; }
   .walkthrough-workspace > section, .walkthrough-deck > div { animation: none; }
 }
 
-.workspace { position: relative; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, .9fr) minmax(0, .9fr); height: min(540px, calc(100dvh - 289px)); flex: 0 0 min(540px, calc(100dvh - 289px)); min-height: 0; }
+.workspace { position: relative; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, .9fr) minmax(0, .9fr); height: min(540px, calc(100dvh - 254px)); flex: 0 0 min(540px, calc(100dvh - 254px)); min-height: 0; }
 .simulation-shell, .momentum-panel, .analysis-panel { min-width: 0; min-height: 0; position: relative; border-bottom: 1px solid var(--line); }
 .simulation-shell { border-right: 1px solid var(--line); overflow: hidden; background: #050b10; }
 .simulation-canvas { position: absolute; inset: 0; }
@@ -104,12 +104,13 @@ button { color: inherit; }
 .simulation-shell .overlay-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(210px, 1fr); column-gap: 10px; align-items: start; height: auto; }
 .eyebrow, .control-title { display: block; color: var(--cyan); font: 9px 'DM Mono', monospace; letter-spacing: 0.17em; margin-bottom: 6px; }
 .panel-heading h2 { margin: 0; font-size: 16px; font-weight: 500; letter-spacing: -0.02em; }
-.chart-toolbar { min-height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 12px 4px; }
-.chart-bins-control { display: grid; grid-template-columns: auto 82px 22px; align-items: center; gap: 4px; padding: 5px 1px; border: 1px solid var(--line); border-radius: 3px; background: rgba(5, 12, 17, .52); }
+.analysis-panel-heading { display: block; height: auto; min-height: 64px; }
+.chart-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chart-heading-row h2 { min-width: 0; }
+.chart-bins-control { display: grid; flex-shrink: 0; grid-template-columns: auto 64px 22px; align-items: center; gap: 4px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 3px; background: rgba(5, 12, 17, .52); }
 .chart-bins-control span { color: #657b85; font: 8px 'DM Mono', monospace; letter-spacing: .08em; }
-.chart-bins-control input { width: 82px; }
+.chart-bins-control input { width: 64px; }
 .chart-bins-control b { color: #b8c7cd; font: 500 10px 'DM Mono', monospace; text-align: right; }
-.sample-label { height: 24px; padding: 6px 3px; margin-top: 2px; border: 1px solid var(--line); border-radius: 3px; color: #718792; font: 9px/10px 'DM Mono', monospace; letter-spacing: 0.13em; white-space: nowrap; }
 .gas-diagnostic-stack { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 210px; }
 .simulation-shell .gas-diagnostic-stack { justify-self: end; }
 .flow-regime-indicator { min-width: 180px; padding: 7px 9px; border: 1px solid rgba(143, 184, 198, .18); border-radius: 3px; background: rgba(6, 13, 18, .78); text-align: right; }
@@ -172,8 +173,8 @@ button { color: inherit; }
 .color-key.band-threshold-key i { background: linear-gradient(90deg, #50585b 0 30%, #59ed9d 35% 65%, #50585b 70% 100%); }
 
 .analysis-panel { overflow: auto; overscroll-behavior: contain; background: linear-gradient(150deg, rgba(11, 24, 31, 0.98), rgba(6, 14, 19, 0.98)); display: flex; flex-direction: column; }
-.analysis-panel > .panel-heading, .analysis-panel > .chart-toolbar, .analysis-panel > .velocity-strip, .analysis-panel > .stats-heading, .analysis-panel > .stats-grid { flex-shrink: 0; }
-.chart-wrap { position: relative; height: 200px; flex: 0 0 200px; padding: 0 10px 3px 4px; }
+.analysis-panel > .panel-heading, .analysis-panel > .velocity-strip, .analysis-panel > .stats-heading, .analysis-panel > .stats-grid { flex-shrink: 0; }
+.chart-wrap { position: relative; height: 230px; flex: 0 0 230px; padding: 0 10px 3px 4px; }
 .velocity-strip { height: 42px; margin: 2px 14px 8px; border: 1px solid var(--line); border-radius: 3px; display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(5, 12, 17, 0.65); }
 .velocity-strip > div { padding: 7px 8px; display: grid; grid-template-columns: 1fr auto; align-items: baseline; border-right: 1px solid var(--line); }
 .velocity-strip > div:last-child { border: 0; }
@@ -381,10 +382,8 @@ select { width: 100%; height: 35px; color: #dce9ed; border: 1px solid #29404a; b
 .control-deck input[type='range'] { display: block; width: 100%; height: 16px; margin: 8px 0 3px; accent-color: var(--cyan); cursor: pointer; }
 .control-deck input[type='range']:disabled { cursor: not-allowed; }
 
-footer { flex: 0 0 35px; min-height: 0; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; color: #435963; font: 7px 'DM Mono', monospace; letter-spacing: .05em; }
-footer strong { color: #657b85; }
-
 @media (max-width: 1100px) {
+  .analysis-panel-heading h2 { font-size: 14px; }
   .control-deck { grid-template-columns: repeat(4, minmax(240px, 1fr)); }
   .momentum-panel-heading { height: auto; flex: 0 0 auto; flex-direction: column; gap: 8px; padding-bottom: 10px; }
   .momentum-panel-heading button { height: 36px; min-height: 30px; padding: 6px 8px; width: 100%; line-height: 20px; white-space: nowrap; }
@@ -403,7 +402,7 @@ footer strong { color: #657b85; }
   .topbar-meta { gap: 8px; }
   .topbar-meta > span { display: none; }
   .header-reset-button { min-width: 98px; padding: 0 8px; font-size: 7px; }
-  .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); height: min(540px, calc(100dvh - 289px)); flex-basis: min(540px, calc(100dvh - 289px)); }
+  .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); height: min(540px, calc(100dvh - 254px)); flex-basis: min(540px, calc(100dvh - 254px)); }
   .momentum-panel { grid-column: 2; grid-row: 1; }
   .workspace > .analysis-panel { grid-column: 1 / -1; grid-row: 2; }
   .panel-heading { padding-inline: 14px; }
@@ -420,10 +419,7 @@ footer strong { color: #657b85; }
   .simulation-shell .color-key i { width: 45px; }
   .simulation-shell .scale-note { right: 10px; font-size: 6px; }
   .simulation-shell .length-reference { right: 10px; bottom: 55px; }
-  .chart-toolbar { justify-content: space-between; padding-inline: 13px; }
-  .chart-bins-control { grid-template-columns: auto 68px 20px; }
-  .chart-bins-control input { width: 68px; }
-  .chart-wrap { height: 220px; flex-basis: 220px; }
+  .chart-wrap { height: 250px; flex-basis: 250px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); padding-inline: 13px; }
   .velocity-strip, .stats-heading { margin-inline: 13px; }
   .control-deck { grid-template-columns: repeat(4, minmax(calc(100vw - 30px), 1fr)); }
@@ -438,7 +434,6 @@ footer strong { color: #657b85; }
   .walkthrough-guide p { font-size: 11px; }
   .walkthrough-actions { flex-direction: row; }
   .walkthrough-actions button { flex: 1; font-size: 9px; }
-  footer { flex-direction: column; align-items: flex-start; padding: 5px 15px; overflow: auto; }
   .view-hint { display: none; }
 }
 

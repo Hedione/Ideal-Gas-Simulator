@@ -44,13 +44,14 @@ export function DistributionChart(props: DistributionChartProps) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     const chart = new Chart(canvas, {
       type: 'bar',
       data: { datasets: [] },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: false,
+        animation: { duration: 200, easing: 'easeOutCubic' },
         parsing: false,
         normalized: true,
         interaction: { intersect: false, mode: 'nearest' },
@@ -65,14 +66,14 @@ export function DistributionChart(props: DistributionChartProps) {
           x: {
             type: 'linear', min: 0,
             title: { display: true, text: 'SPEED (m/s)', color: '#78909b', font: { size: 10, weight: 600 } },
-            ticks: { color: '#78909b', maxTicksLimit: 7 },
+            ticks: { color: '#78909b', maxTicksLimit: 7, includeBounds: false },
             grid: { color: 'rgba(114, 151, 164, 0.08)' },
             border: { color: 'rgba(114, 151, 164, 0.18)' },
           },
           y: {
             beginAtZero: true,
             title: { display: true, text: 'PROBABILITY DENSITY (s/m)', color: '#78909b', font: { size: 10, weight: 600 } },
-            ticks: { color: '#78909b', maxTicksLimit: 6, callback: (value) => Number(value).toExponential(1) },
+            ticks: { color: '#78909b', maxTicksLimit: 6, includeBounds: false, callback: (value) => Number(value).toExponential(1) },
             grid: { color: 'rgba(114, 151, 164, 0.08)' },
             border: { color: 'rgba(114, 151, 164, 0.18)' },
           },
@@ -94,16 +95,16 @@ export function DistributionChart(props: DistributionChartProps) {
       } = settingsRef.current
       const maxSpeed = characteristicMaxSpeed(simulation.targetTemperature, simulation.massAmu)
       const histogram = buildHistogram(simulation.speeds, bins, maxSpeed)
-      const maxDensity = Math.max(...histogram.density)
       const curve = Array.from({ length: 181 }, (_, i) => {
         const x = (i / 180) * maxSpeed
         return { x, y: maxwellBoltzmannDensity(x, simulation.targetTemperature, simulation.massAmu) }
       })
+      const maxDensity = Math.max(...histogram.density, ...curve.map((point) => point.y))
       const marker = (label: string, x: number, color: string) => ({
         type: 'line' as const, label, data: [{ x, y: 0 }, { x, y: maxDensity * 1.12 }],
-        borderColor: color, borderWidth: 1, borderDash: [4, 4], pointRadius: 0, order: 0,
+        borderColor: color, borderWidth: 1, borderDash: [], pointRadius: 0, order: 0,
       })
-      chart.data.datasets = [
+      const datasets = [
         {
           type: 'bar', label: 'Simulated',
           data: histogram.centers.map((x, i) => ({ x, y: histogram.density[i] })),
@@ -124,9 +125,17 @@ export function DistributionChart(props: DistributionChartProps) {
           marker(`Band lower (${Math.max(0, bandCenter - bandHalfWidth)} m/s)`, Math.max(0, bandCenter - bandHalfWidth), '#78e6aa'),
           marker(`Band upper (${bandCenter + bandHalfWidth} m/s)`, bandCenter + bandHalfWidth, '#78e6aa'),
         ] : []),
-      ] as never
+      ]
+      const initialized = chart.data.datasets.length > 0
+      // Keep dataset identities while cutoff values change so transitions start at the previous positions.
+      chart.data.datasets = datasets.map((dataset) => {
+        const key = dataset.label.split(' (')[0]
+        const existing = chart.data.datasets.find((previous) => previous.label?.split(' (')[0] === key)
+        return Object.assign(existing ?? {}, dataset)
+      }) as never
       if (chart.options.scales?.x) chart.options.scales.x.max = maxSpeed
-      chart.update('none')
+      if (chart.options.scales?.y) chart.options.scales.y.max = maxDensity * 1.2
+      chart.update(initialized && !reducedMotion.matches ? undefined : 'none')
     }
     update()
     const interval = window.setInterval(update, 140)

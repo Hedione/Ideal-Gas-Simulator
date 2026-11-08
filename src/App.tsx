@@ -686,19 +686,16 @@ function App() {
         </section>}
 
         {visible('distribution') && <section id="walkthrough-distribution" tabIndex={-1} className={`analysis-panel${currentModuleClass('distribution')}`}>
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">SPEED DISTRIBUTION</span>
+          <div className="panel-heading analysis-panel-heading">
+            <span className="eyebrow">SPEED DISTRIBUTION</span>
+            <div className="chart-heading-row">
               <h2>Maxwell–Boltzmann profile</h2>
+              <label className="chart-bins-control">
+                <span>BINS</span>
+                <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => { setBins(Number(event.target.value)); completeTask('distribution') }} onDoubleClick={() => setBins(100)} aria-label="Histogram bins" title="Histogram bins · double-click to reset" />
+                <b>{bins}</b>
+              </label>
             </div>
-          </div>
-          <div className="chart-toolbar">
-            <span className="sample-label">N = {particleCount.toLocaleString()}</span>
-            <label className="chart-bins-control">
-              <span>HISTOGRAM BINS</span>
-              <input type="range" min="20" max="100" step="5" value={bins} onChange={(event) => { setBins(Number(event.target.value)); completeTask('distribution') }} onDoubleClick={() => setBins(100)} title="Double-click to reset" />
-              <b>{bins}</b>
-            </label>
           </div>
           <DistributionChart
             simulation={simulation}
@@ -1230,10 +1227,6 @@ function App() {
 
       </section>
 
-      <footer>
-        <p><strong>MODEL:</strong> {dsmcEnabled ? 'dilute hard-sphere DSMC gas with elastic binary collisions' : 'nonrelativistic, collisionless ideal gas with perfectly elastic walls'}</p>
-        <p>Thermal momentum exchange occurs only at wall contacts. One- and two-face modes use the highlighted selected walls; DSMC handles particle collisions.</p>
-      </footer>
     </main>
   )
 }
