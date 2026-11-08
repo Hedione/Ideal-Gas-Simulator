@@ -42,20 +42,24 @@ function formatSimulationRate(multiplier: number): string {
 }
 
 function App() {
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false)
   const [walkthrough, dispatchWalkthrough] = useReducer(walkthroughReducer, initialWalkthrough)
   const walking = walkthrough.mode === 'walkthrough'
   const currentStep = WALKTHROUGH_STEPS[walkthrough.step]
   const currentTask = currentStep.tasks[walkthrough.task]
   const lastTask = walkthrough.task === currentStep.tasks.length - 1
+  const lastStep = walkthrough.step === WALKTHROUGH_STEPS.length - 1
   const visible = (module: WalkthroughModule) => isModuleVisible(walkthrough, module)
   const currentModuleClass = (module: WalkthroughModule) => walking && currentStep.id === module ? ' walkthrough-current' : ''
   const completeTask = (task: WalkthroughTask) => dispatchWalkthrough({ type: 'interact', task })
 
   useEffect(() => {
     if (!walking) return
-    const target = currentTask.id === 'momentum-orbit'
-      ? document.querySelector<HTMLElement>('.momentum-space-canvas')
-      : document.getElementById(`walkthrough-${currentStep.id}`)
+    const target = currentTask.id === 'header-reset'
+      ? document.querySelector<HTMLButtonElement>('.header-reset-button')
+      : currentTask.id === 'information'
+        ? document.querySelector<HTMLButtonElement>('.info-button')
+        : document.getElementById(`walkthrough-${currentStep.id}`)
     target?.focus({ preventScroll: true })
     target?.scrollIntoView({ block: 'nearest' })
   }, [walking, currentStep.id, currentTask.id])
@@ -110,6 +114,57 @@ function App() {
   const [showInfo, setShowInfo] = useState(false)
   const [stats, setStats] = useState<SimulationStats>(() => simulation.statistics())
 
+  const closeInfo = useCallback(() => {
+    setShowInfo(false)
+    if (showInfo) dispatchWalkthrough({ type: 'interact', task: 'information' })
+  }, [showInfo])
+
+  const toggleFocus = useCallback((mode: 'hot' | 'cold' | 'band' | 'random') => {
+    const [enabled, setEnabled] = ({
+      hot: [highlightFast, setHighlightFast],
+      cold: [highlightCold, setHighlightCold],
+      band: [highlightBand, setHighlightBand],
+      random: [trackParticle, setTrackParticle],
+    } as const)[mode]
+    setEnabled((value) => !value)
+    if (!enabled) dispatchWalkthrough({ type: 'interact', task: 'focus' })
+  }, [highlightFast, highlightCold, highlightBand, trackParticle])
+
+  const toggleParticleOcclusion = useCallback(() => {
+    setParticleOcclusionEnabled((value) => !value)
+    if (!particleOcclusionEnabled) dispatchWalkthrough({ type: 'interact', task: 'occlusion' })
+  }, [particleOcclusionEnabled])
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') setKeyboardNavigation(true)
+      if (showInfo || walkthrough.mode === 'choose' || event.defaultPrevented || event.repeat || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+      const target = event.target
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return
+      const key = event.key.toLowerCase()
+      if (key === ' ') {
+        event.preventDefault()
+        // Space is the playback shortcut; clear the last clicked control's focus outline.
+        if (target instanceof HTMLElement) target.blur()
+        if (isModuleVisible(walkthrough, 'simulation')) setPlaying((value) => !value)
+      } else if (key === 'o' && isModuleVisible(walkthrough, 'simulation')) {
+        event.preventDefault()
+        toggleParticleOcclusion()
+      } else if (key === 't' && isModuleVisible(walkthrough, 'temperature')) {
+        event.preventDefault()
+        setThermostatEnabled((value) => !value)
+      } else if (isModuleVisible(walkthrough, 'focus')) {
+        const mode = key === 'h' ? 'hot' : key === 'c' ? 'cold' : key === 'b' ? 'band' : key === 'r' ? 'random' : null
+        if (mode) {
+          event.preventDefault()
+          toggleFocus(mode)
+        }
+      }
+    }
+    window.addEventListener('keydown', onShortcut)
+    return () => window.removeEventListener('keydown', onShortcut)
+  }, [showInfo, walkthrough, toggleFocus, toggleParticleOcclusion])
+
   useEffect(() => {
     const update = () => {
       setStats(simulation.statistics())
@@ -160,11 +215,11 @@ function App() {
   useEffect(() => {
     if (!showInfo) return
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowInfo(false)
+      if (event.key === 'Escape') closeInfo()
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [showInfo])
+  }, [showInfo, closeInfo])
 
   const applyTemperature = useCallback((next: number) => {
     const value = Math.max(5, Math.min(5000, Number.isFinite(next) ? next : 300))
@@ -370,8 +425,10 @@ function App() {
 
   const advanceWalkthrough = () => {
     const next = walkthroughReducer(walkthrough, { type: 'next' })
-    if (next.step !== walkthrough.step) resetSimulationOptions(true)
+    if (next.step !== walkthrough.step && WALKTHROUGH_STEPS[next.step].id !== 'finish') resetSimulationOptions(true)
     if (next !== walkthrough && WALKTHROUGH_STEPS[next.step].tasks[next.task].id === 'occlusion') {
+      setBoxLengthMicrometers(0.1)
+      simulation.setBoxLength(0.1e-6)
       setCollisionDiameterAngstrom(20)
       setParticleMarkerDiameterAngstrom(20)
       setMatchMarkerToCollisionDiameter(true)
@@ -464,7 +521,7 @@ function App() {
   const maximumBrownianDiameterAngstrom = Math.max(5, Math.min(500, boxLengthMicrometers * 1e4 * 0.8))
   const focusActive = highlightFast || highlightCold || highlightBand || trackParticle || (brownianEnabled && brownianFocus)
   return (
-    <main className="app-shell">
+    <main className={`app-shell${keyboardNavigation ? ' keyboard-navigation' : ''}`} onPointerDownCapture={() => setKeyboardNavigation(false)}>
       <header className="topbar">
         <div className="brand-mark"><span /><i /><b /></div>
         <div className="brand-copy">
@@ -473,8 +530,19 @@ function App() {
         </div>
         <div className="topbar-meta">
           <span><i className="live-dot" /> LIVE MODEL</span>
-          <button className="info-button" onClick={() => setShowInfo((value) => !value)} aria-expanded={showInfo}>i</button>
-          <button className="header-reset-button" type="button" onClick={() => resetSimulationOptions()}>RESET SIMULATION</button>
+          <button
+            className={`info-button${walking && currentTask.id === 'information' ? ' walkthrough-current' : ''}`}
+            onClick={() => showInfo ? closeInfo() : setShowInfo(true)}
+            aria-label="Information about the simulation"
+            aria-expanded={showInfo}
+            aria-describedby={walking && currentTask.id === 'information' ? 'walkthrough-instructions' : undefined}
+          >i</button>
+          <button
+            className={`header-reset-button${walking && currentTask.id === 'header-reset' ? ' walkthrough-current' : ''}`}
+            type="button"
+            aria-describedby={walking && currentTask.id === 'header-reset' ? 'walkthrough-instructions' : undefined}
+            onClick={() => { resetSimulationOptions(); completeTask('header-reset') }}
+          >RESET SIMULATION</button>
         </div>
       </header>
 
@@ -488,16 +556,16 @@ function App() {
           <div className="walkthrough-copy">
             <span className="eyebrow">WALKTHROUGH · {walkthrough.step + 1} OF {WALKTHROUGH_STEPS.length} · TASK {walkthrough.task + 1} OF {currentStep.tasks.length}</span>
             <h2>{currentStep.title}</h2>
-            <p>{currentTask.prompt}</p>
+            <p id="walkthrough-instructions">{currentTask.prompt}</p>
             <span className="walkthrough-status" role="status">
-              {walkthrough.completed ? `Task complete. Ready for the next ${lastTask ? 'module' : 'task'}.` : currentStep.id === 'zoom'
+              {walkthrough.completed ? lastStep && lastTask ? 'All tasks complete. You can now finish the walkthrough.' : `Task complete. Ready for the next ${lastTask ? 'module' : 'task'}.` : currentStep.id === 'zoom'
                 ? `Zoom in: ${walkthrough.zoomedIn ? 'done' : 'to do'} · Zoom out: ${walkthrough.zoomedOut ? 'done' : 'to do'}`
                 : 'Try the task above to continue.'}
             </span>
           </div>
           <div className="walkthrough-actions">
-            <button type="button" className="walkthrough-next" disabled={!walkthrough.completed} onClick={advanceWalkthrough}>
-              {!lastTask ? 'NEXT TASK' : walkthrough.step === WALKTHROUGH_STEPS.length - 1 ? 'FINISH WALKTHROUGH' : 'NEXT MODULE'}
+            <button type="button" className="walkthrough-next" disabled={!walkthrough.completed || showInfo} onClick={advanceWalkthrough}>
+              {!lastTask ? 'NEXT TASK' : lastStep ? 'FINISH WALKTHROUGH' : 'NEXT MODULE'}
             </button>
             <button type="button" onClick={() => dispatchWalkthrough({ type: 'full' })}>FULL ACCESS NOW</button>
           </div>
@@ -505,19 +573,26 @@ function App() {
       )}
 
       {showInfo && (
-        <div className="info-modal-backdrop" role="presentation" onMouseDown={() => setShowInfo(false)}>
+        <div className="info-modal-backdrop" role="presentation" onMouseDown={closeInfo}>
           <section className="info-modal" role="dialog" aria-modal="true" aria-labelledby="simulation-info-title" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="info-modal-close" onClick={() => setShowInfo(false)} aria-label="Close information">×</button>
+            <button className="info-modal-close" onClick={closeInfo} aria-label="Close information">×</button>
             <span className="eyebrow">ABOUT THE MODEL</span>
             <h2 id="simulation-info-title">A microscopic laboratory for an ideal gas</h2>
             <p>This browser simulation follows a three-dimensional ensemble of classical particles inside a controllable box. It connects individual trajectories and collisions to temperature, pressure, velocity distributions, mean free path, and flow regime.</p>
-            <div className="info-modal-grid">
-              <article><b>MOLECULAR MOTION</b><p>Particle velocities begin with a Maxwell–Boltzmann distribution. The physical and momentum-space views show the same live ensemble from complementary perspectives.</p></article>
-              <article><b>COLLISIONS</b><p>Optional DSMC hard-sphere collisions exchange momentum and energy locally while conserving both quantities for each gas-particle pair.</p></article>
-              <article><b>THERMAL WALLS</b><p>Heat enters or leaves only through eligible wall contacts. Diffuse reflection thermally resamples an outgoing velocity; specular reflection conserves particle speed.</p></article>
-              <article><b>MODEL LIMITS</b><p>The simulator is a dilute classical-gas model, not molecular dynamics. The packing warning identifies settings where finite-size correlations make the ideal-gas interpretation physically dubious.</p></article>
-            </div>
-            <p className="info-modal-footnote">All calculations run locally in the browser. Controls alter the model in real time; diagnostic focus modes change only the visualization.</p>
+            <p>For more information, visit the <a href="https://github.com/Hedione/Ideal-Gas-Simulator" target="_blank" rel="noopener noreferrer">project on GitHub</a>.</p>
+            <section className="info-shortcuts" aria-labelledby="keyboard-shortcuts-title">
+              <h3 id="keyboard-shortcuts-title">Keyboard shortcuts</h3>
+              <dl>
+                <div><dt><kbd>Space</kbd></dt><dd>Pause / play simulation</dd></div>
+                <div><dt><kbd>H</kbd></dt><dd>Toggle hot particle focus</dd></div>
+                <div><dt><kbd>C</kbd></dt><dd>Toggle cold particle focus</dd></div>
+                <div><dt><kbd>B</kbd></dt><dd>Toggle speed-band focus</dd></div>
+                <div><dt><kbd>R</kbd></dt><dd>Toggle random particle tracking</dd></div>
+                <div><dt><kbd>T</kbd></dt><dd>Toggle thermal bath</dd></div>
+                <div><dt><kbd>O</kbd></dt><dd>Toggle particle occlusion</dd></div>
+                <div><dt><kbd>+</kbd> / <kbd>−</kbd></dt><dd>Zoom focused particle view</dd></div>
+              </dl>
+            </section>
           </section>
         </div>
       )}
@@ -663,20 +738,34 @@ function App() {
           <span id="simulation-controls-title" className="control-title">SIMULATION</span>
           <div className="transport">
             <div className="transport-actions">
-              <button className="primary-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'}>
+              <button className="primary-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause' : 'Play'} aria-keyshortcuts="Space" title="Pause / play (Space)">
                 {playing ? 'Ⅱ' : '▶'}
               </button>
               <button onClick={reset} aria-label="Reset simulation">↻</button>
             </div>
-            <button
-              type="button"
-              className={`transport-collisions ${dsmcEnabled ? 'active' : ''}`}
-              aria-pressed={dsmcEnabled}
-              onClick={() => setDsmcEnabled((value) => !value)}
-            >
-              <b>COLLISIONS {dsmcEnabled ? 'ON' : 'OFF'}</b>
-              <span>DSMC</span>
-            </button>
+            <div className="transport-features">
+              <button
+                type="button"
+                className={`transport-toggle particle-occlusion-button ${particleOcclusionEnabled ? 'active' : ''}`}
+                aria-label="Particle occlusion"
+                aria-pressed={particleOcclusionEnabled}
+                aria-keyshortcuts="O"
+                title="Toggle particle occlusion (O): nearer particles hide those behind them"
+                onClick={toggleParticleOcclusion}
+              >
+                <b>OCCLUSION</b>
+                <span>{particleOcclusionEnabled ? 'ON' : 'OFF'}</span>
+              </button>
+              <button
+                type="button"
+                className={`transport-toggle transport-collisions ${dsmcEnabled ? 'active' : ''}`}
+                aria-pressed={dsmcEnabled}
+                onClick={() => setDsmcEnabled((value) => !value)}
+              >
+                <b>COLLISIONS</b>
+                <span>{dsmcEnabled ? 'ON' : 'OFF'} · DSMC</span>
+              </button>
+            </div>
           </div>
           <label className="compact-slider">
             <span>
@@ -817,6 +906,7 @@ function App() {
           <button
             type="button"
             className={`thermal-bath-master ${thermostatEnabled ? 'active' : ''}`}
+            aria-keyshortcuts="T"
             aria-pressed={thermostatEnabled}
             onClick={toggleThermalBath}
           >
@@ -1021,24 +1111,15 @@ function App() {
             </div>
           </div>
           <small className="physical-scale-note">Rendered to physical scale relative to the box; independent of particle count.</small>
-          <button
-            type="button"
-            className={`particle-occlusion-button ${particleOcclusionEnabled ? 'active' : ''}`}
-            aria-pressed={particleOcclusionEnabled}
-            onClick={() => { setParticleOcclusionEnabled((value) => !value); if (!particleOcclusionEnabled) completeTask('occlusion') }}
-          >
-            <b>PARTICLE OCCLUSION {particleOcclusionEnabled ? 'ON' : 'OFF'}</b>
-            <span>{particleOcclusionEnabled ? 'nearest particles hide particles behind them' : 'additive transparent particle cloud'}</span>
-          </button>
         </div>}
 
         {visible('focus') && <div id="walkthrough-focus" tabIndex={0} role="region" aria-labelledby="focus-controls-title" className={`control-block focus-block${currentModuleClass('focus')}`}>
           <span id="focus-controls-title" className="control-title">PARTICLE FOCUS & TRACKING</span>
           <div className="focus-button-grid">
-            <button className={`focus-button hot ${highlightFast ? 'active' : ''}`} aria-pressed={highlightFast} onClick={() => { setHighlightFast((value) => !value); if (!highlightFast) completeTask('focus') }}><b>HOT</b><span>above cutoff</span></button>
-            <button className={`focus-button cold ${highlightCold ? 'active' : ''}`} aria-pressed={highlightCold} onClick={() => { setHighlightCold((value) => !value); if (!highlightCold) completeTask('focus') }}><b>COLD</b><span>below cutoff</span></button>
-            <button className={`focus-button band ${highlightBand ? 'active' : ''}`} aria-pressed={highlightBand} onClick={() => { setHighlightBand((value) => !value); if (!highlightBand) completeTask('focus') }}><b>BAND</b><span>speed window</span></button>
-            <button className={`focus-button random ${trackParticle ? 'active' : ''}`} aria-pressed={trackParticle} onClick={() => { setTrackParticle((value) => !value); if (!trackParticle) completeTask('focus') }}><b>RANDOM</b><span>single atom</span></button>
+            <button className={`focus-button hot ${highlightFast ? 'active' : ''}`} aria-pressed={highlightFast} aria-keyshortcuts="H" title="Toggle hot particle focus (H)" onClick={() => toggleFocus('hot')}><b>HOT</b><span>above cutoff</span></button>
+            <button className={`focus-button cold ${highlightCold ? 'active' : ''}`} aria-pressed={highlightCold} aria-keyshortcuts="C" title="Toggle cold particle focus (C)" onClick={() => toggleFocus('cold')}><b>COLD</b><span>below cutoff</span></button>
+            <button className={`focus-button band ${highlightBand ? 'active' : ''}`} aria-pressed={highlightBand} aria-keyshortcuts="B" title="Toggle speed-band focus (B)" onClick={() => toggleFocus('band')}><b>BAND</b><span>speed window</span></button>
+            <button className={`focus-button random ${trackParticle ? 'active' : ''}`} aria-pressed={trackParticle} aria-keyshortcuts="R" title="Toggle random particle tracking (R)" onClick={() => toggleFocus('random')}><b>RANDOM</b><span>single atom</span></button>
           </div>
           {trackParticle && (
             <button

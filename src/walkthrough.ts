@@ -1,17 +1,17 @@
 export const WALKTHROUGH_STEPS = [
   { id: 'zoom', title: 'Explore the particle simulation', tasks: [
-    { id: 'zoom', prompt: 'Zoom in to see particles up close, then zoom out to see the box. Scroll, pinch, or use the zoom buttons.' },
+    { id: 'zoom', prompt: 'Zoom in to see particles up close, then zoom out to see the box. Scroll or pinch, or focus the particle view and press + / −.' },
   ] },
   { id: 'population', title: 'Gas & particle population', tasks: [
     { id: 'population', prompt: 'Change PARTICLE COUNT to add or remove gas molecules. Watch the live particle field respond.' },
     { id: 'collision-diameter', prompt: 'Increase COLLISION DIAMETER and watch what happens in the chamber. With marker matching on, the visible particles also grow.' },
-    { id: 'occlusion', prompt: 'Collision and marker diameters are now 20 Å. Scroll down inside GAS & PARTICLE POPULATION and turn PARTICLE OCCLUSION on. Compare how nearer particles hide those behind them.' },
   ] },
   { id: 'simulation', title: 'Control the simulation', tasks: [
     { id: 'speed-up', prompt: 'Increase TIME SCALE above 1× to speed up the simulation. Watch the particles move faster.' },
     { id: 'slow-down', prompt: 'Now reduce TIME SCALE below 1× to slow down the simulation and inspect the motion.' },
     { id: 'box-size', prompt: 'Change BOX SIDE LENGTH and observe how the chamber scale and gas density change.' },
     { id: 'starting-condition', prompt: 'Scroll down to STARTING CONDITIONS and try RMS SPEED, X-ALIGNED, Y-ALIGNED, or Z-ALIGNED. Watch the gas relax from the chosen state.' },
+    { id: 'occlusion', prompt: 'The box is now 0.10 μm wide, with collision and marker diameters at 20 Å. Scroll to the top of SIMULATION and turn OCCLUSION on between Reset and Collisions. Compare how nearer particles hide those behind them.' },
   ] },
   { id: 'temperature', title: 'Temperature & thermal walls', tasks: [
     { id: 'heat', prompt: 'Increase the target temperature to at least 500 K. Watch the gas gain energy through thermal wall contacts.' },
@@ -20,13 +20,17 @@ export const WALKTHROUGH_STEPS = [
   ] },
   { id: 'momentum', title: 'Explore momentum space', tasks: [
     { id: 'momentum', prompt: 'Adjust POINT SIZE beneath the momentum cloud. Each point represents the momentum of a gas particle.' },
-    { id: 'momentum-orbit', prompt: 'Drag the momentum cloud to explore it in 3D. You can also focus the view and use the Left/Right arrow keys to rotate.' },
+    { id: 'momentum-orbit', prompt: 'Drag the momentum cloud to explore it in 3D.' },
   ] },
   { id: 'distribution', title: 'Read the speed distribution', tasks: [
     { id: 'distribution', prompt: 'Change HISTOGRAM BINS to regroup the measured speeds. Compare the histogram with the Maxwell–Boltzmann curve.' },
   ] },
   { id: 'focus', title: 'Focus & track particles', tasks: [
     { id: 'focus', prompt: 'Enable HOT, COLD, BAND, or RANDOM to highlight a group of particles or follow a single atom.' },
+  ] },
+  { id: 'finish', title: 'Ready to explore', tasks: [
+    { id: 'header-reset', prompt: 'Press RESET SIMULATION in the top-right corner to restore the default experiment.' },
+    { id: 'information', prompt: 'Open the i information button at the top right for more information about the model and keyboard shortcuts. Close the information page, then click Finish walkthrough.' },
   ] },
 ] as const
 

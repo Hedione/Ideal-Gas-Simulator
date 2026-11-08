@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GasSimulation, thermalSigma, ThermalWallContact } from '../physics'
+import { FrameRateMonitor } from '../frameRate'
 
 interface SimulationViewProps {
   onZoom?: (direction: 'in' | 'out') => void
@@ -184,6 +185,7 @@ export function SimulationView(props: SimulationViewProps) {
   const orientationLabelsRef = useRef<Array<SVGTextElement | null>>([])
   const settingsRef = useRef(props)
   const zoomRef = useRef<(factor: number) => void>(() => {})
+  const [frameRate, setFrameRate] = useState<{ fps: number; limited: boolean } | null>(null)
   settingsRef.current = props
 
   useEffect(() => {
@@ -399,6 +401,16 @@ export function SimulationView(props: SimulationViewProps) {
 
     let animationFrame = 0
     let previous = performance.now()
+    const frameRateMonitor = new FrameRateMonitor()
+    let monitoring = false
+    setFrameRate(null)
+    const resetFrameRate = () => {
+      previous = performance.now()
+      frameRateMonitor.reset()
+      monitoring = false
+      setFrameRate(null)
+    }
+    document.addEventListener('visibilitychange', resetFrameRate)
     let frame = 0
     let activeTrackedParticle = -1
     let trailSegmentCount = 0
@@ -425,8 +437,20 @@ export function SimulationView(props: SimulationViewProps) {
     const animate = (now: number) => {
       animationFrame = requestAnimationFrame(animate)
       const current = settingsRef.current
-      const wallDt = Math.min(0.05, Math.max(0, (now - previous) / 1000))
+      const frameMilliseconds = now - previous
+      const wallDt = Math.min(0.05, Math.max(0, frameMilliseconds / 1000))
       previous = now
+      if (!document.hidden) {
+        if (monitoring) {
+          const sample = frameRateMonitor.sample(frameMilliseconds)
+          if (sample) setFrameRate(sample)
+        }
+        monitoring = true
+      } else if (monitoring) {
+        frameRateMonitor.reset()
+        monitoring = false
+        setFrameRate(null)
+      }
       const positionAttribute = geometry.getAttribute('position') as THREE.BufferAttribute
       if (positionAttribute.array !== current.simulation.positions) {
         const previousGeometry = geometry
@@ -694,6 +718,7 @@ export function SimulationView(props: SimulationViewProps) {
     return () => {
       cancelAnimationFrame(animationFrame)
       resizeObserver.disconnect()
+      document.removeEventListener('visibilitychange', resetFrameRate)
       controls.removeEventListener('change', reportZoom)
       controls.dispose()
       zoomRef.current = () => {}
@@ -725,15 +750,34 @@ export function SimulationView(props: SimulationViewProps) {
   const numberDensity = props.simulation.count / (props.simulation.boxLengthMeters ** 3)
   const packingFraction = numberDensity * (Math.PI / 6) * (props.collisionDiameterAngstrom * 1e-10) ** 3
   const packingStatus = getPackingRegime(packingFraction)
+  const performanceLimited = frameRate?.limited === true
 
   return (
-    <div id="walkthrough-zoom" tabIndex={-1} className={`simulation-shell${props.walkthroughCurrent ? ' walkthrough-current' : ''}`}>
+    <div
+      id="walkthrough-zoom"
+      tabIndex={0}
+      role="region"
+      aria-label="Particle simulation. Use plus and minus to zoom."
+      className={`simulation-shell${props.walkthroughCurrent ? ' walkthrough-current' : ''}`}
+      onKeyDown={(event) => {
+        if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return
+        if (event.key === '+' || event.key === '=' || event.key === '-') {
+          event.preventDefault()
+          zoomRef.current(event.key === '-' ? 1.25 : 0.8)
+        }
+      }}
+    >
       <div className="panel-heading overlay-heading">
         <div>
           <span className="eyebrow">LIVE PARTICLE FIELD</span>
           <h2>Microscopic view</h2>
         </div>
-        {props.showDiagnostics !== false && <div className="gas-diagnostic-stack">
+        <div className={`frame-rate-counter${performanceLimited ? ' performance-warning' : ''}`} title={performanceLimited ? 'Reduce time scale, particle count, or temperature to improve frame rate.' : 'Rendering frame rate'}>
+          {performanceLimited && <span aria-hidden="true">⚠</span>}
+          <b>{frameRate?.fps ?? '—'} FPS</b>
+          {performanceLimited && <span className="visually-hidden" role="status">Simulation is struggling. Reduce time scale, particle count, or temperature.</span>}
+        </div>
+        {props.dsmcEnabled && props.showDiagnostics !== false && <div className="gas-diagnostic-stack">
           <div className={`flow-regime-indicator ${flowRegime.key}`} title={`Current Knudsen number: ${props.knudsenNumber}`}>
             <b>{flowRegime.label}</b>
             <small>{flowRegime.criterion} · Kn = {formatKnudsenNumber(props.knudsenNumber)}</small>
@@ -745,12 +789,6 @@ export function SimulationView(props: SimulationViewProps) {
         </div>}
       </div>
       <div ref={hostRef} className="simulation-canvas" aria-label="Interactive 3D gas particle simulation" />
-      {props.onZoom && (
-        <div className="walkthrough-zoom-controls" role="group" aria-label="Simulation zoom">
-          <button type="button" onClick={() => zoomRef.current(0.8)}>Zoom in</button>
-          <button type="button" onClick={() => zoomRef.current(1.25)}>Zoom out</button>
-        </div>
-      )}
       <div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
       <div className="scale-note">{(props.simulation.boxLengthMeters * 1e6).toFixed(2)} μm box · marker diameter to scale</div>
       {props.thermostatEnabled && props.thermalBathMode !== 'all' && (

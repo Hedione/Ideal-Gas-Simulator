@@ -33,7 +33,6 @@ export function EntryDialog({ onWalkthrough, onFullAccess }: EntryDialogProps) {
           <b>ENTER SIMULATOR</b>
         </button>
       </div>
-      <p className="info-modal-footnote">You can switch to full access at any point during the walkthrough.</p>
     </dialog>
   )
 }

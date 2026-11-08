@@ -67,7 +67,6 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
   const momentumReferenceLabelRef = useRef<HTMLSpanElement>(null)
   const momentumReferenceBarRef = useRef<HTMLElement>(null)
   const settingsRef = useRef(props)
-  const orbitRef = useRef<(direction: number) => void>(() => {})
   settingsRef.current = props
 
   useEffect(() => {
@@ -113,15 +112,6 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
     controls.addEventListener('end', endOrbit)
     controls.addEventListener('change', reportOrbit)
     renderer.domElement.addEventListener('pointerdown', preparePointerOrbit, true)
-    orbitRef.current = (direction) => {
-      orbitInteraction = Boolean(settingsRef.current.onOrbit)
-      lastRotation.copy(camera.quaternion)
-      const offset = camera.position.clone().sub(controls.target)
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), direction * Math.PI / 12)
-      camera.position.copy(controls.target).add(offset)
-      controls.update()
-      endOrbit()
-    }
 
     let coordinates = new Float32Array(props.simulation.count * 3)
     let colors = new Float32Array(props.simulation.count * 3)
@@ -280,7 +270,6 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
       controls.removeEventListener('change', reportOrbit)
       renderer.domElement.removeEventListener('pointerdown', preparePointerOrbit, true)
       controls.dispose()
-      orbitRef.current = () => {}
       geometry.dispose()
       material.dispose()
       ;(bounds.geometry as THREE.BufferGeometry).dispose()
@@ -298,13 +287,7 @@ export function MomentumSpaceView(props: MomentumSpaceViewProps) {
       <div
         ref={hostRef}
         className="momentum-space-canvas"
-        tabIndex={props.onOrbit ? 0 : undefined}
-        aria-label="Interactive three-dimensional particle momentum-space distribution. Use Left/Right arrow keys to rotate during the walkthrough."
-        onKeyDown={(event) => {
-          if (!props.onOrbit || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
-          event.preventDefault()
-          orbitRef.current(event.key === 'ArrowLeft' ? -1 : 1)
-        }}
+        aria-label="Interactive three-dimensional particle momentum-space distribution. Drag to rotate."
       />
       <div className="momentum-axis-key" aria-hidden="true">
         <span className="axis-x">p<sub>x</sub></span>

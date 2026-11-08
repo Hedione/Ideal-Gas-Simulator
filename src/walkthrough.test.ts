@@ -33,12 +33,13 @@ describe('walkthrough progression', () => {
     expect(state.task).toBe(0)
   })
 
-  it('requires population, collision diameter, and occlusion in order before revealing simulation controls', () => {
+  it('requires population and collision diameter before revealing simulation controls', () => {
     let state = startPopulation()
-    const tasks: WalkthroughTask[] = ['population', 'collision-diameter', 'occlusion']
+    const tasks: WalkthroughTask[] = ['population', 'collision-diameter']
     expect(WALKTHROUGH_STEPS[1].tasks.map((task) => task.id)).toEqual(tasks)
     for (let index = 0; index < tasks.length; index += 1) {
       expect(state.task).toBe(index)
+      expect(walkthroughReducer(state, { type: 'interact', task: 'occlusion' })).toBe(state)
       const wrongTask = tasks[(index + 1) % tasks.length]
       expect(walkthroughReducer(state, { type: 'interact', task: wrongTask })).toBe(state)
       expect(walkthroughReducer(state, { type: 'next' })).toBe(state)
@@ -54,8 +55,19 @@ describe('walkthrough progression', () => {
     expect(isModuleVisible(state, 'simulation')).toBe(true)
   })
 
-  it('includes both playback speeds, box size, and a starting condition in the simulation module', () => {
-    expect(WALKTHROUGH_STEPS[2].tasks.map((task) => task.id)).toEqual(['speed-up', 'slow-down', 'box-size', 'starting-condition'])
+  it('requires occlusion after playback, box size, and starting-condition tasks in the simulation module', () => {
+    const tasks = WALKTHROUGH_STEPS[2].tasks.map((task) => task.id)
+    expect(tasks).toEqual(['speed-up', 'slow-down', 'box-size', 'starting-condition', 'occlusion'])
+    let state: typeof initialWalkthrough = { ...initialWalkthrough, mode: 'walkthrough', step: 2 }
+    for (const task of tasks.slice(0, -1)) {
+      expect(walkthroughReducer(state, { type: 'interact', task: 'occlusion' })).toBe(state)
+      state = walkthroughReducer(state, { type: 'interact', task })
+      state = walkthroughReducer(state, { type: 'next' })
+    }
+    expect(state.step).toBe(2)
+    expect(walkthroughReducer(state, { type: 'next' })).toBe(state)
+    state = walkthroughReducer(state, { type: 'interact', task: 'occlusion' })
+    expect(walkthroughReducer(state, { type: 'next' }).step).toBe(3)
   })
 
   it('requires heating, one thermal face, and cooling in that order', () => {
@@ -93,6 +105,36 @@ describe('walkthrough progression', () => {
       }
     }
     expect(state.mode).toBe('full')
+  })
+
+  it('requires the header reset, then leaving information before finishing', () => {
+    const finalStep = WALKTHROUGH_STEPS.length - 1
+    expect(WALKTHROUGH_STEPS[finalStep].tasks.map((task) => task.id)).toEqual(['header-reset', 'information'])
+    let state: typeof initialWalkthrough = { ...initialWalkthrough, mode: 'walkthrough', step: finalStep }
+    expect(walkthroughReducer(state, { type: 'next' })).toBe(state)
+    expect(walkthroughReducer(state, { type: 'interact', task: 'information' })).toBe(state)
+    state = walkthroughReducer(state, { type: 'interact', task: 'header-reset' })
+    expect(state.completed).toBe(true)
+    state = walkthroughReducer(state, { type: 'next' })
+    expect(state.task).toBe(1)
+    expect(state.completed).toBe(false)
+    expect(walkthroughReducer(state, { type: 'next' })).toBe(state)
+    expect(walkthroughReducer(state, { type: 'interact', task: 'header-reset' })).toBe(state)
+    state = walkthroughReducer(state, { type: 'interact', task: 'information' })
+    expect(state.mode).toBe('walkthrough')
+    expect(state.completed).toBe(true)
+    expect(walkthroughReducer(state, { type: 'next' }).mode).toBe('full')
+  })
+
+  it('does not count earlier reset or information interactions toward the final module', () => {
+    let state: typeof initialWalkthrough = { ...initialWalkthrough, mode: 'walkthrough', step: 6 }
+    expect(walkthroughReducer(state, { type: 'interact', task: 'header-reset' })).toBe(state)
+    expect(walkthroughReducer(state, { type: 'interact', task: 'information' })).toBe(state)
+    state = walkthroughReducer(state, { type: 'interact', task: 'focus' })
+    state = walkthroughReducer(state, { type: 'next' })
+    expect(WALKTHROUGH_STEPS[state.step].id).toBe('finish')
+    expect(state.task).toBe(0)
+    expect(state.completed).toBe(false)
   })
 
   it('allows leaving an incomplete walkthrough and ignores later task events', () => {
