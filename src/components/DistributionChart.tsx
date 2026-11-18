@@ -64,16 +64,17 @@ export function DistributionChart(props: DistributionChartProps) {
         },
         scales: {
           x: {
-            type: 'linear', min: 0,
+            // Bar-chart padding would move speed zero away from the plot origin.
+            type: 'linear', min: 0, offset: false,
             title: { display: true, text: 'SPEED (m/s)', color: '#78909b', font: { size: 10, weight: 600 } },
             ticks: { color: '#78909b', maxTicksLimit: 7, includeBounds: false },
-            grid: { color: 'rgba(114, 151, 164, 0.08)' },
+            grid: { color: 'rgba(114, 151, 164, 0.08)', offset: false },
             border: { color: 'rgba(114, 151, 164, 0.18)' },
           },
           y: {
             beginAtZero: true,
             title: { display: true, text: 'PROBABILITY DENSITY (s/m)', color: '#78909b', font: { size: 10, weight: 600 } },
-            ticks: { color: '#78909b', maxTicksLimit: 6, includeBounds: false, callback: (value) => Number(value).toExponential(1) },
+            ticks: { color: '#78909b', maxTicksLimit: 6, includeBounds: false, callback: (value) => Number(value) === 0 ? '0' : Number(value).toExponential(1) },
             grid: { color: 'rgba(114, 151, 164, 0.08)' },
             border: { color: 'rgba(114, 151, 164, 0.18)' },
           },
@@ -81,6 +82,11 @@ export function DistributionChart(props: DistributionChartProps) {
       },
     })
 
+    let previousHistogram: ReturnType<typeof buildHistogram> | undefined
+    let previousSimulation: GasSimulation | undefined
+    let previousSpeeds: Float32Array | undefined
+    let previousElapsedTime = 0
+    let yMaximum = 0
     const update = () => {
       const {
         simulation,
@@ -95,13 +101,27 @@ export function DistributionChart(props: DistributionChartProps) {
       } = settingsRef.current
       const maxSpeed = characteristicMaxSpeed(simulation.targetTemperature, simulation.massAmu)
       const histogram = buildHistogram(simulation.speeds, bins, maxSpeed)
+      const resetDisplay = simulation !== previousSimulation || simulation.speeds !== previousSpeeds ||
+        histogram.maxSpeed !== previousHistogram?.maxSpeed || histogram.density.length !== previousHistogram?.density.length ||
+        simulation.elapsedTime < previousElapsedTime
+      if (!resetDisplay && previousHistogram) {
+        const previousDensity = previousHistogram.density
+        // Average display samples only; the simulation and live observables keep their full precision.
+        histogram.density = histogram.density.map((density, i) => previousDensity[i] + 0.25 * (density - previousDensity[i]))
+      }
       const curve = Array.from({ length: 181 }, (_, i) => {
         const x = (i / 180) * maxSpeed
         return { x, y: maxwellBoltzmannDensity(x, simulation.targetTemperature, simulation.massAmu) }
       })
       const maxDensity = Math.max(...histogram.density, ...curve.map((point) => point.y))
+      // Keep sampling noise inside fixed headroom; rescale only for a substantial distribution change.
+      if (resetDisplay || maxDensity > yMaximum || maxDensity < yMaximum * 0.4) yMaximum = maxDensity * 1.35
+      previousHistogram = histogram
+      previousSimulation = simulation
+      previousSpeeds = simulation.speeds
+      previousElapsedTime = simulation.elapsedTime
       const marker = (label: string, x: number, color: string) => ({
-        type: 'line' as const, label, data: [{ x, y: 0 }, { x, y: maxDensity * 1.12 }],
+        type: 'line' as const, label, data: [{ x, y: 0 }, { x, y: yMaximum * 0.93 }],
         borderColor: color, borderWidth: 1, borderDash: [], pointRadius: 0, order: 0,
       })
       const datasets = [
@@ -134,11 +154,11 @@ export function DistributionChart(props: DistributionChartProps) {
         return Object.assign(existing ?? {}, dataset)
       }) as never
       if (chart.options.scales?.x) chart.options.scales.x.max = maxSpeed
-      if (chart.options.scales?.y) chart.options.scales.y.max = maxDensity * 1.2
+      if (chart.options.scales?.y) chart.options.scales.y.max = yMaximum
       chart.update(initialized && !reducedMotion.matches ? undefined : 'none')
     }
     update()
-    const interval = window.setInterval(update, 140)
+    const interval = window.setInterval(update, 250)
     return () => {
       window.clearInterval(interval)
       chart.destroy()

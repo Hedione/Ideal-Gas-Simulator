@@ -31,7 +31,7 @@ npm run build
 - Collisionless mode uses noninteracting points. Optional hard-sphere DSMC mode performs stochastic, spatially local binary collisions that conserve pair momentum and kinetic energy. Wall collisions are perfectly elastic, and a triangle-wave coordinate fold handles any number of wall crossings in one update.
 - At the 1× default, the simulation advances about 0.1 ns (100 ps) of physical time per wall-clock second. A live ps/s or ns/s readout shows the physical rate at every time-scale setting.
 - The measured kinetic temperature is calculated from the actual ensemble using `T = m ⟨v²⟩ / (3 k_B)`. Finite samples fluctuate statistically around the target.
-- The histogram uses every simulated particle, is normalized by `N × bin width`, and updates independently from rendering.
+- The histogram uses every simulated particle, is normalized by `N × bin width`, and updates independently from rendering. Displayed bars are lightly averaged to reduce equilibrium jitter. The y-axis stays steady through small fluctuations and rescales for substantial distribution changes; its zero tick reads `0`. Speed zero stays at the lower-left plot origin as temperature changes.
 
 ### Thermal bath
 
@@ -87,7 +87,7 @@ Particle marker diameter is rendered at its physical ratio to the box. At diamet
 | O | Toggle particle occlusion |
 | + / − | Zoom in / out while the particle view has focus |
 
-These shortcuts also appear in the information dialog. They ignore editable controls, held-key repeats, and Ctrl/Alt/Meta combinations, and are suspended while a dialog is open. Space controls playback and clears focus from the last control, preventing a module focus outline or accidental button activation. Use Enter to activate focused buttons. Module focus outlines appear during Tab navigation; unrelated keys do not highlight the last clicked module. During the walkthrough, shortcuts unlock with the corresponding modules. Zoom uses scroll, pinch, or the focused view's keyboard controls; the walkthrough has no zoom buttons.
+These shortcuts also appear in the information dialog. They ignore editable controls, held-key repeats, and Ctrl/Alt/Meta combinations, and are suspended while a dialog is open. Space also works when a slider has focus; arrow keys still adjust sliders normally. Space controls playback and clears focus from the last control, preventing a module focus outline or accidental button activation. Its press, release, and repeat events are intercepted before focused buttons; holding Space toggles playback only once. Use Enter to activate focused buttons. Module focus outlines appear during Tab navigation; unrelated keys do not highlight the last clicked module. During the walkthrough, shortcuts unlock with the corresponding modules. Zoom uses scroll, pinch, or the focused view's keyboard controls; the walkthrough has no zoom buttons.
 
 ## Tests
 

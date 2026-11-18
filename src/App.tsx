@@ -137,17 +137,25 @@ function App() {
 
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
-      if (event.key === 'Tab') setKeyboardNavigation(true)
-      if (showInfo || walkthrough.mode === 'choose' || event.defaultPrevented || event.repeat || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+      if (event.type === 'keydown' && event.key === 'Tab') setKeyboardNavigation(true)
+      if (showInfo || walkthrough.mode === 'choose' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
       const target = event.target
-      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return
       const key = event.key.toLowerCase()
-      if (key === ' ') {
+      const isSpace = key === ' ' || event.code === 'Space'
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') &&
+        !(isSpace && target.matches('input[type="range"]'))) return
+      if (isSpace) {
+        // Own the full Space sequence so repeats and keyup cannot activate a focused button.
         event.preventDefault()
+        event.stopPropagation()
+        if (event.type !== 'keydown' || event.repeat) return
         // Space is the playback shortcut; clear the last clicked control's focus outline.
         if (target instanceof HTMLElement) target.blur()
         if (isModuleVisible(walkthrough, 'simulation')) setPlaying((value) => !value)
-      } else if (key === 'o' && isModuleVisible(walkthrough, 'simulation')) {
+        return
+      }
+      if (event.type !== 'keydown' || event.defaultPrevented || event.repeat) return
+      if (key === 'o' && isModuleVisible(walkthrough, 'simulation')) {
         event.preventDefault()
         toggleParticleOcclusion()
       } else if (key === 't' && isModuleVisible(walkthrough, 'temperature')) {
@@ -161,8 +169,12 @@ function App() {
         }
       }
     }
-    window.addEventListener('keydown', onShortcut)
-    return () => window.removeEventListener('keydown', onShortcut)
+    window.addEventListener('keydown', onShortcut, true)
+    window.addEventListener('keyup', onShortcut, true)
+    return () => {
+      window.removeEventListener('keydown', onShortcut, true)
+      window.removeEventListener('keyup', onShortcut, true)
+    }
   }, [showInfo, walkthrough, toggleFocus, toggleParticleOcclusion])
 
   useEffect(() => {
